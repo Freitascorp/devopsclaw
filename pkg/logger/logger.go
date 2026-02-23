@@ -52,6 +52,9 @@ type LogEntry struct {
 func init() {
 	once.Do(func() {
 		logger = &Logger{}
+		// Redirect default log output to stderr so it never pollutes
+		// interactive terminal UI (stdout is reserved for styled output).
+		log.SetOutput(os.Stderr)
 	})
 }
 

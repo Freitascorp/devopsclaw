@@ -42,6 +42,8 @@ type AgentLoop struct {
 	channelManager *channels.Manager
 	toolGuard      *rbac.ToolGuard
 	confirmCb      ToolConfirmCallback
+	eventCb        EventCallback
+	totalUsage     usageAccumulator
 }
 
 // ToolConfirmCallback is invoked before executing tools that require human approval.
@@ -110,6 +112,41 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 // When nil (default), tools execute without confirmation for backward compatibility.
 func (al *AgentLoop) SetConfirmCallback(cb ToolConfirmCallback) {
 	al.confirmCb = cb
+}
+
+// SetEventCallback registers a callback for real-time agent loop events.
+// This enables Claude Code–style visibility into tool calls and iterations.
+func (al *AgentLoop) SetEventCallback(cb EventCallback) {
+	al.eventCb = cb
+}
+
+// emit sends an event to the registered callback, if any.
+func (al *AgentLoop) emit(event AgentEvent) {
+	if al.eventCb != nil {
+		al.eventCb(event)
+	}
+}
+
+// usageAccumulator tracks cumulative token usage across iterations.
+type usageAccumulator struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
+func (u *usageAccumulator) Add(usage *providers.UsageInfo) {
+	if usage == nil {
+		return
+	}
+	u.PromptTokens += usage.PromptTokens
+	u.CompletionTokens += usage.CompletionTokens
+	u.TotalTokens += usage.TotalTokens
+}
+
+func (u *usageAccumulator) Reset() {
+	u.PromptTokens = 0
+	u.CompletionTokens = 0
+	u.TotalTokens = 0
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
@@ -521,9 +558,18 @@ func (al *AgentLoop) runLLMIteration(
 ) (string, int, error) {
 	iteration := 0
 	var finalContent string
+	al.totalUsage.Reset()
 
 	for iteration < agent.MaxIterations {
 		iteration++
+
+		// Emit thinking event — the UI can show a spinner or iteration counter
+		al.emit(AgentEvent{
+			Type:      EventThinking,
+			Iteration: iteration,
+			MaxIter:   agent.MaxIterations,
+			Model:     agent.Model,
+		})
 
 		logger.DebugCF("agent", "LLM iteration",
 			map[string]any{
@@ -633,12 +679,28 @@ func (al *AgentLoop) runLLMIteration(
 					"iteration": iteration,
 					"error":     err.Error(),
 				})
+			al.emit(AgentEvent{
+				Type:      EventError,
+				Iteration: iteration,
+				Content:   err.Error(),
+			})
 			return "", iteration, fmt.Errorf("LLM call failed after retries: %w", err)
 		}
+
+		// Accumulate token usage
+		al.totalUsage.Add(response.Usage)
 
 		// Check if no tool calls - we're done
 		if len(response.ToolCalls) == 0 {
 			finalContent = response.Content
+			al.emit(AgentEvent{
+				Type:             EventResponse,
+				Iteration:        iteration,
+				Content:          finalContent,
+				PromptTokens:     al.totalUsage.PromptTokens,
+				CompletionTokens: al.totalUsage.CompletionTokens,
+				TotalTokens:      al.totalUsage.TotalTokens,
+			})
 			logger.InfoCF("agent", "LLM response without tool calls (direct answer)",
 				map[string]any{
 					"agent_id":      agent.ID,
@@ -709,6 +771,15 @@ func (al *AgentLoop) runLLMIteration(
 					"iteration": iteration,
 				})
 
+			// Emit tool call event — UI shows the tool being invoked
+			al.emit(AgentEvent{
+				Type:      EventToolCall,
+				Iteration: iteration,
+				ToolName:  tc.Name,
+				ToolArgs:  tc.Arguments,
+				ToolID:    tc.ID,
+			})
+
 			// RBAC check — enforce permission before executing the tool
 			if al.toolGuard != nil {
 				userID := rbac.UserID(opts.SenderID)
@@ -724,6 +795,13 @@ func (al *AgentLoop) runLLMIteration(
 							"tool":  tc.Name,
 							"error": err.Error(),
 						})
+					al.emit(AgentEvent{
+						Type:       EventToolDenied,
+						Iteration:  iteration,
+						ToolName:   tc.Name,
+						ToolID:     tc.ID,
+						DenyReason: fmt.Sprintf("Permission denied: %s", err.Error()),
+					})
 					toolResultMsg := providers.Message{
 						Role:       "tool",
 						Content:    fmt.Sprintf("Permission denied: %s", err.Error()),
@@ -741,6 +819,13 @@ func (al *AgentLoop) runLLMIteration(
 						map[string]any{
 							"tool": tc.Name,
 						})
+					al.emit(AgentEvent{
+						Type:       EventToolDenied,
+						Iteration:  iteration,
+						ToolName:   tc.Name,
+						ToolID:     tc.ID,
+						DenyReason: "Denied by user",
+					})
 					toolResultMsg := providers.Message{
 						Role:       "tool",
 						Content:    "Tool execution was denied by the user.",
@@ -796,6 +881,16 @@ func (al *AgentLoop) runLLMIteration(
 			if contentForLLM == "" && toolResult.Err != nil {
 				contentForLLM = toolResult.Err.Error()
 			}
+
+			// Emit tool result event — UI shows the output
+			al.emit(AgentEvent{
+				Type:       EventToolResult,
+				Iteration:  iteration,
+				ToolName:   tc.Name,
+				ToolID:     tc.ID,
+				ToolOutput: contentForLLM,
+				IsError:    toolResult.IsError,
+			})
 
 			toolResultMsg := providers.Message{
 				Role:       "tool",
