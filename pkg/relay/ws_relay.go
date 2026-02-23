@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -106,6 +107,11 @@ func (s *WSServer) Start(ctx context.Context) error {
 		}
 		err = s.httpSrv.Serve(listener)
 	} else {
+		// Warn when TLS is not configured for non-localhost addresses
+		if !strings.HasPrefix(s.config.ListenAddr, "127.0.0.1") && !strings.HasPrefix(s.config.ListenAddr, "localhost") {
+			s.logger.Warn("relay server starting WITHOUT TLS on non-localhost address — use TLS in production",
+				"addr", s.config.ListenAddr)
+		}
 		err = s.httpSrv.ListenAndServe()
 	}
 
@@ -132,18 +138,18 @@ func (s *WSServer) Stop(ctx context.Context) error {
 
 // handleAgentConnect handles WebSocket upgrade for node agents.
 func (s *WSServer) handleAgentConnect(w http.ResponseWriter, r *http.Request) {
-	// Auth check
+	// Auth check — constant-time comparison to prevent timing attacks
 	token := r.Header.Get("Authorization")
 	if s.config.AuthToken != "" {
 		expected := "Bearer " + s.config.AuthToken
-		if !strings.EqualFold(token, expected) {
+		if len(token) != len(expected) || subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
+		InsecureSkipVerify: false,
 	})
 	if err != nil {
 		s.logger.Error("websocket accept failed", "error", err)

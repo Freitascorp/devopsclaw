@@ -72,6 +72,41 @@ func agentCmd() {
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
 
+	// Set up human-in-the-loop confirmation for destructive tool calls
+	agentLoop.SetConfirmCallback(func(toolName string, args map[string]any) bool {
+		preview := ""
+		switch toolName {
+		case "exec":
+			if cmd, ok := args["command"].(string); ok {
+				preview = cmd
+			}
+		case "write_file", "edit_file", "append_file":
+			if path, ok := args["path"].(string); ok {
+				preview = path
+			}
+		case "web_fetch":
+			if u, ok := args["url"].(string); ok {
+				preview = u
+			}
+		case "browser":
+			if u, ok := args["url"].(string); ok {
+				preview = u
+			}
+		}
+
+		if preview != "" {
+			fmt.Printf("\n⚠️  Tool \"%s\" wants to run: %s\n", toolName, preview)
+		} else {
+			fmt.Printf("\n⚠️  Tool \"%s\" is requesting execution\n", toolName)
+		}
+		fmt.Print("   Allow? [Y/n]: ")
+
+		reader := bufio.NewReader(os.Stdin)
+		line, _ := reader.ReadString('\n')
+		answer := strings.TrimSpace(strings.ToLower(line))
+		return answer == "" || answer == "y" || answer == "yes"
+	})
+
 	// Print agent startup info (only for interactive mode)
 	startupInfo := agentLoop.GetStartupInfo()
 	logger.InfoCF("agent", "Agent initialized",

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,7 +52,7 @@ func (r *ToolRegistry) ExecuteWithContext(
 	logger.InfoCF("tool", "Tool execution started",
 		map[string]any{
 			"tool": name,
-			"args": args,
+			"args": redactSensitiveArgs(name, args),
 		})
 
 	tool, ok := r.Get(name)
@@ -180,4 +181,25 @@ func (r *ToolRegistry) GetSummaries() []string {
 		summaries = append(summaries, fmt.Sprintf("- `%s` - %s", tool.Name(), tool.Description()))
 	}
 	return summaries
+}
+
+// sensitiveArgKeys is the set of argument keys that should be redacted in logs.
+var sensitiveArgKeys = map[string]bool{
+	"api_key": true, "apikey": true, "api_secret": true,
+	"token": true, "secret": true, "password": true,
+	"authorization": true, "auth": true, "credential": true,
+	"access_token": true, "refresh_token": true,
+}
+
+// redactSensitiveArgs returns a copy of args with sensitive values masked.
+func redactSensitiveArgs(toolName string, args map[string]any) map[string]any {
+	redacted := make(map[string]any, len(args))
+	for k, v := range args {
+		if sensitiveArgKeys[strings.ToLower(k)] {
+			redacted[k] = "***REDACTED***"
+		} else {
+			redacted[k] = v
+		}
+	}
+	return redacted
 }

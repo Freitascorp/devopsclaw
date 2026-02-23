@@ -38,7 +38,9 @@ func (c *AuthCredential) NeedsRefresh() bool {
 
 func authFilePath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".devopsclaw", "auth.json")
+	configDir := filepath.Join(home, ".devopsclaw")
+	os.MkdirAll(configDir, 0o700)
+	return filepath.Join(configDir, "auth.json")
 }
 
 func LoadStore() (*AuthStore, error) {

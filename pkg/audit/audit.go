@@ -98,7 +98,7 @@ type FileStore struct {
 
 // NewFileStore creates a file-based audit store at the given directory.
 func NewFileStore(dir string) *FileStore {
-	os.MkdirAll(dir, 0o755)
+	os.MkdirAll(dir, 0o700)
 	return &FileStore{dir: dir}
 }
 
@@ -123,7 +123,7 @@ func (s *FileStore) Append(ctx context.Context, event *Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	f, err := os.OpenFile(s.logFile(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(s.logFile(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open audit log: %w", err)
 	}

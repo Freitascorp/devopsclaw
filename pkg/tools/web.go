@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -60,8 +61,8 @@ func (p *BraveSearchProvider) Search(ctx context.Context, query string, count in
 	}
 
 	if err := json.Unmarshal(body, &searchResp); err != nil {
-		// Log error body for debugging
-		fmt.Printf("Brave API Error Body: %s\n", string(body))
+		// Log error status only — do not expose response body which may contain sensitive info
+		fmt.Printf("Brave API error: HTTP status from API\n")
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -440,7 +441,8 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) *ToolR
 }
 
 type WebFetchTool struct {
-	maxChars int
+	maxChars      int
+	skipSSRFCheck bool // for testing only — allows localhost test servers
 }
 
 func NewWebFetchTool(maxChars int) *WebFetchTool {
@@ -450,6 +452,14 @@ func NewWebFetchTool(maxChars int) *WebFetchTool {
 	return &WebFetchTool{
 		maxChars: maxChars,
 	}
+}
+
+// NewWebFetchToolForTesting creates a WebFetchTool with SSRF checks disabled.
+// This is intended only for unit tests that use localhost test servers.
+func NewWebFetchToolForTesting(maxChars int) *WebFetchTool {
+	t := NewWebFetchTool(maxChars)
+	t.skipSSRFCheck = true
+	return t
 }
 
 func (t *WebFetchTool) Name() string {
@@ -495,6 +505,13 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 
 	if parsedURL.Host == "" {
 		return ErrorResult("missing domain in URL")
+	}
+
+	// SSRF protection: block requests to private/internal networks and cloud metadata
+	if !t.skipSSRFCheck {
+		if err := checkSSRF(parsedURL); err != nil {
+			return ErrorResult(fmt.Sprintf("URL blocked (SSRF protection): %v", err))
+		}
 	}
 
 	maxChars := t.maxChars
@@ -614,4 +631,64 @@ func (t *WebFetchTool) extractText(htmlContent string) string {
 	}
 
 	return strings.Join(cleanLines, "\n")
+}
+
+// ssrfBlockedCIDRs contains private, loopback, link-local, and cloud metadata IP ranges.
+var ssrfBlockedCIDRs = func() []*net.IPNet {
+	cidrs := []string{
+		"127.0.0.0/8",      // Loopback
+		"10.0.0.0/8",       // Private (RFC 1918)
+		"172.16.0.0/12",    // Private (RFC 1918)
+		"192.168.0.0/16",   // Private (RFC 1918)
+		"169.254.0.0/16",   // Link-local / AWS metadata
+		"100.64.0.0/10",    // Shared address space (CGN)
+		"0.0.0.0/8",        // Current network
+		"::1/128",          // IPv6 loopback
+		"fc00::/7",         // IPv6 unique local
+		"fe80::/10",        // IPv6 link-local
+	}
+	var nets []*net.IPNet
+	for _, cidr := range cidrs {
+		_, n, _ := net.ParseCIDR(cidr)
+		if n != nil {
+			nets = append(nets, n)
+		}
+	}
+	return nets
+}()
+
+// ssrfBlockedHosts contains hostnames commonly used for cloud metadata endpoints.
+var ssrfBlockedHosts = map[string]bool{
+	"metadata.google.internal":       true,
+	"metadata.google.com":            true,
+	"169.254.169.254":                true,
+	"169.254.170.2":                  true, // AWS ECS metadata
+	"fd00:ec2::254":                  true, // AWS IMDSv2 IPv6
+}
+
+// checkSSRF validates a URL against SSRF attacks by blocking private/internal addresses.
+func checkSSRF(u *url.URL) error {
+	hostname := u.Hostname()
+
+	// Block known metadata hostnames directly
+	if ssrfBlockedHosts[strings.ToLower(hostname)] {
+		return fmt.Errorf("access to %s is blocked (cloud metadata endpoint)", hostname)
+	}
+
+	// Resolve hostname to IPs and check each one
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		// If we can't resolve it, allow it — it will fail at the HTTP level anyway
+		return nil
+	}
+
+	for _, ip := range ips {
+		for _, cidr := range ssrfBlockedCIDRs {
+			if cidr.Contains(ip) {
+				return fmt.Errorf("access to %s (%s) is blocked (private/internal network)", hostname, ip)
+			}
+		}
+	}
+
+	return nil
 }

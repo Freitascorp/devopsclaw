@@ -329,5 +329,8 @@ func DefaultConfig() *Config {
 			Enabled:  false,
 			Headless: true,
 		},
+		RBAC: RBACConfig{
+			Enabled: true,
+		},
 	}
 }

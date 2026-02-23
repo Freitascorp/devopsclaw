@@ -1,0 +1,40 @@
+# Binaries
+build/
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+devopsclaw
+
+# Config with real credentials
+config.json
+auth.json
+*.env
+.env.*
+
+# Secrets & keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go
+vendor/
+*.test
+coverage.out
+coverage.html
+
+# Memory/session data (may contain sensitive context)
+workspace/memory/*.md
+workspace/memory/**/*.md

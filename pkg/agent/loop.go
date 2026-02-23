@@ -41,6 +41,22 @@ type AgentLoop struct {
 	fallback       *providers.FallbackChain
 	channelManager *channels.Manager
 	toolGuard      *rbac.ToolGuard
+	confirmCb      ToolConfirmCallback
+}
+
+// ToolConfirmCallback is invoked before executing tools that require human approval.
+// It receives the tool name and arguments, and returns true if the user approves.
+// If nil, all tools execute without confirmation (backward-compatible).
+type ToolConfirmCallback func(toolName string, args map[string]any) bool
+
+// toolsRequiringConfirmation is the set of tool names that should prompt for user approval.
+var toolsRequiringConfirmation = map[string]bool{
+	"exec":       true,
+	"write_file": true,
+	"edit_file":  true,
+	"append_file": true,
+	"web_fetch":  true,
+	"browser":    true,
 }
 
 // processOptions configures how a message is processed
@@ -86,6 +102,14 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 		fallback:    fallbackChain,
 		toolGuard:   toolGuard,
 	}
+}
+
+// SetConfirmCallback sets a callback that is invoked before executing tools
+// that require human approval (exec, write_file, edit_file, etc.).
+// In interactive CLI mode, this prompts the user for [y/n] confirmation.
+// When nil (default), tools execute without confirmation for backward compatibility.
+func (al *AgentLoop) SetConfirmCallback(cb ToolConfirmCallback) {
+	al.confirmCb = cb
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
@@ -706,6 +730,24 @@ func (al *AgentLoop) runLLMIteration(
 						ToolCallID: tc.ID,
 					}
 					messages = append(messages, toolResultMsg)
+					continue
+				}
+			}
+
+			// Human confirmation check — prompt before executing destructive tools
+			if al.confirmCb != nil && toolsRequiringConfirmation[tc.Name] {
+				if !al.confirmCb(tc.Name, tc.Arguments) {
+					logger.InfoCF("agent", "User denied tool execution",
+						map[string]any{
+							"tool": tc.Name,
+						})
+					toolResultMsg := providers.Message{
+						Role:       "tool",
+						Content:    "Tool execution was denied by the user.",
+						ToolCallID: tc.ID,
+					}
+					messages = append(messages, toolResultMsg)
+					agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
 					continue
 				}
 			}
