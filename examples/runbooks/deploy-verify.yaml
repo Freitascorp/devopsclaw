@@ -1,0 +1,61 @@
+# Rolling Deployment Verification
+# Copy to ~/.devopsclaw/runbooks/ to use with `devopsclaw runbook run`
+name: deploy-verify
+description: Post-deployment health verification checklist
+tags:
+  - deploy
+  - verification
+  - health
+
+steps:
+  - name: Check application health endpoint
+    run: |
+      HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL:-http://localhost:8080/health}")
+      if [ "$HTTP_STATUS" = "200" ]; then
+        echo "Health check passed (HTTP $HTTP_STATUS)"
+      else
+        echo "Health check FAILED (HTTP $HTTP_STATUS)"
+        exit 1
+      fi
+    timeout_sec: 30
+    capture: health_status
+
+  - name: Verify running version
+    run: curl -s "${VERSION_URL:-http://localhost:8080/version}" | jq .
+    timeout_sec: 10
+    capture: deployed_version
+
+  - name: Check error rate in logs
+    run: |
+      ERROR_COUNT=$(journalctl -u "${SERVICE_NAME:-myapp}" --since "5 minutes ago" --no-pager | grep -ci "error\|panic\|fatal" || true)
+      echo "Errors in last 5 minutes: $ERROR_COUNT"
+      if [ "$ERROR_COUNT" -gt 10 ]; then
+        echo "ERROR RATE TOO HIGH"
+        exit 1
+      fi
+    continue_on_error: true
+    capture: error_count
+
+  - name: Check resource usage
+    run: |
+      echo "=== Memory ==="
+      free -h
+      echo ""
+      echo "=== Disk ==="
+      df -h /
+      echo ""
+      echo "=== CPU Load ==="
+      uptime
+
+  - name: Verify database connectivity
+    run: |
+      if command -v pg_isready &> /dev/null; then
+        pg_isready -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}"
+      else
+        echo "pg_isready not found, skipping database check"
+      fi
+    continue_on_error: true
+
+  - name: Notify deployment verified
+    notify: slack
+    message: "Deployment verified. Version: {{deployed_version}}. Health: {{health_status}}. Errors: {{error_count}}"

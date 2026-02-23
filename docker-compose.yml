@@ -1,0 +1,46 @@
+services:
+  # ─────────────────────────────────────────────
+  # DevOpsClaw Agent (one-shot query)
+  #   docker compose run --rm devopsclaw-agent -m "Hello"
+  # ─────────────────────────────────────────────
+  devopsclaw-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devopsclaw-agent
+    profiles:
+      - agent
+    # Uncomment to access host network; leave commented unless needed.
+    #extra_hosts:
+    #  - "host.docker.internal:host-gateway"
+    volumes:
+      - ./config/config.json:/home/devopsclaw/.devopsclaw/config.json:ro
+      - devopsclaw-workspace:/home/devopsclaw/.devopsclaw/workspace
+    entrypoint: ["devopsclaw", "agent"]
+    stdin_open: true
+    tty: true
+
+  # ─────────────────────────────────────────────
+  # DevOpsClaw Gateway (Long-running Bot)
+  #   docker compose up devopsclaw-gateway
+  # ─────────────────────────────────────────────
+  devopsclaw-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devopsclaw-gateway
+    restart: unless-stopped
+    profiles:
+      - gateway
+    # Uncomment to access host network; leave commented unless needed.
+    #extra_hosts:
+    #  - "host.docker.internal:host-gateway"
+    volumes:
+      # Configuration file
+      - ./config/config.json:/home/devopsclaw/.devopsclaw/config.json:ro
+      # Persistent workspace (sessions, memory, logs)
+      - devopsclaw-workspace:/home/devopsclaw/.devopsclaw/workspace
+    command: ["gateway"]
+
+volumes:
+  devopsclaw-workspace:

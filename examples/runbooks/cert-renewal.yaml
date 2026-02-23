@@ -1,0 +1,45 @@
+# SSL Certificate Renewal
+# Copy to ~/.devopsclaw/runbooks/ to use with `devopsclaw runbook run`
+name: cert-renewal
+description: Check and renew SSL certificates via Let's Encrypt
+tags:
+  - ssl
+  - certificates
+  - maintenance
+
+steps:
+  - name: Check certificate expiry
+    run: |
+      DOMAIN="${DOMAIN:-example.com}"
+      EXPIRY=$(echo | openssl s_client -servername "$DOMAIN" -connect "$DOMAIN:443" 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)
+      echo "Domain: $DOMAIN"
+      echo "Expires: $EXPIRY"
+      EXPIRY_EPOCH=$(date -d "$EXPIRY" +%s 2>/dev/null || date -jf "%b %d %T %Y %Z" "$EXPIRY" +%s 2>/dev/null)
+      NOW=$(date +%s)
+      DAYS_LEFT=$(( (EXPIRY_EPOCH - NOW) / 86400 ))
+      echo "Days remaining: $DAYS_LEFT"
+      if [ "$DAYS_LEFT" -lt 30 ]; then
+        echo "RENEWAL_NEEDED=true"
+      else
+        echo "RENEWAL_NEEDED=false"
+      fi
+    capture: cert_status
+
+  - name: Approval to renew certificate
+    run: "echo 'Certificate renewal will briefly restart the web server'"
+    requires_approval: true
+
+  - name: Renew certificate
+    run: |
+      certbot renew --non-interactive --deploy-hook "systemctl reload nginx"
+    timeout_sec: 120
+
+  - name: Verify new certificate
+    run: |
+      DOMAIN="${DOMAIN:-example.com}"
+      echo | openssl s_client -servername "$DOMAIN" -connect "$DOMAIN:443" 2>/dev/null | openssl x509 -noout -dates -subject
+    timeout_sec: 30
+
+  - name: Notify completion
+    notify: slack
+    message: "SSL certificate renewal complete for ${DOMAIN:-example.com}. Status: {{cert_status}}"

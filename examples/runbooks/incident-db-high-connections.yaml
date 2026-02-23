@@ -1,0 +1,53 @@
+# Incident Response: Database High Connection Count
+# Copy to ~/.devopsclaw/runbooks/ to use with `devopsclaw runbook run`
+name: incident-db-high-connections
+description: Investigate and mitigate high database connection count
+tags:
+  - incident
+  - database
+  - postgres
+
+steps:
+  - name: Check current connection count
+    run: psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "SELECT count(*) AS total, state FROM pg_stat_activity GROUP BY state ORDER BY total DESC;"
+    env:
+      DB_HOST: "${DB_HOST:-localhost}"
+      DB_USER: "${DB_USER:-postgres}"
+      DB_NAME: "${DB_NAME:-production}"
+    capture: connection_count
+
+  - name: Identify long-running queries
+    run: psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "SELECT pid, now() - pg_stat_activity.query_start AS duration, query, state FROM pg_stat_activity WHERE (now() - pg_stat_activity.query_start) > interval '5 minutes' ORDER BY duration DESC LIMIT 20;"
+    env:
+      DB_HOST: "${DB_HOST:-localhost}"
+      DB_USER: "${DB_USER:-postgres}"
+      DB_NAME: "${DB_NAME:-production}"
+
+  - name: Identify connection sources
+    run: psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "SELECT client_addr, usename, application_name, count(*) FROM pg_stat_activity GROUP BY client_addr, usename, application_name ORDER BY count DESC LIMIT 20;"
+    env:
+      DB_HOST: "${DB_HOST:-localhost}"
+      DB_USER: "${DB_USER:-postgres}"
+      DB_NAME: "${DB_NAME:-production}"
+
+  - name: Approval to kill idle connections
+    run: "echo 'Awaiting approval to terminate idle connections older than 10 minutes'"
+    requires_approval: true
+
+  - name: Kill idle connections older than 10 minutes
+    run: psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND (now() - state_change) > interval '10 minutes' AND pid <> pg_backend_pid();"
+    env:
+      DB_HOST: "${DB_HOST:-localhost}"
+      DB_USER: "${DB_USER:-postgres}"
+      DB_NAME: "${DB_NAME:-production}"
+
+  - name: Verify connection count reduced
+    run: psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "SELECT count(*) AS total, state FROM pg_stat_activity GROUP BY state ORDER BY total DESC;"
+    env:
+      DB_HOST: "${DB_HOST:-localhost}"
+      DB_USER: "${DB_USER:-postgres}"
+      DB_NAME: "${DB_NAME:-production}"
+
+  - name: Notify team
+    notify: slack
+    message: "DB connection incident mitigated. Previous count: {{connection_count}}. Idle connections older than 10m terminated."

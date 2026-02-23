@@ -1,0 +1,72 @@
+# Fleet Health Check
+# Copy to ~/.devopsclaw/runbooks/ to use with `devopsclaw runbook run`
+name: fleet-health-check
+description: Run comprehensive health checks across all fleet nodes
+tags:
+  - fleet
+  - health
+  - monitoring
+
+steps:
+  - name: Check disk usage
+    run: |
+      echo "=== Disk Usage ==="
+      df -h | awk '$5+0 > 80 {print "WARNING:", $0} $5+0 <= 80 {print "OK:", $0}'
+    target:
+      tag: role=web,role=api
+    capture: disk_report
+
+  - name: Check memory usage
+    run: |
+      echo "=== Memory ==="
+      free -m | awk 'NR==2{printf "Used: %sMB / %sMB (%.1f%%)\n", $3, $2, $3*100/$2}'
+    target:
+      tag: role=web,role=api
+
+  - name: Check systemd services
+    run: |
+      echo "=== Failed Services ==="
+      FAILED=$(systemctl --failed --no-pager --no-legend | wc -l)
+      if [ "$FAILED" -gt 0 ]; then
+        systemctl --failed --no-pager
+        echo "FAILED_SERVICES=$FAILED"
+        exit 1
+      else
+        echo "All services healthy"
+      fi
+    continue_on_error: true
+
+  - name: Check Docker containers
+    run: |
+      if command -v docker &> /dev/null; then
+        echo "=== Docker Containers ==="
+        UNHEALTHY=$(docker ps --filter "health=unhealthy" --format "{{.Names}}: {{.Status}}" | wc -l)
+        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+        if [ "$UNHEALTHY" -gt 0 ]; then
+          echo "WARNING: $UNHEALTHY unhealthy containers"
+          docker ps --filter "health=unhealthy" --format "{{.Names}}: {{.Status}}"
+        fi
+      else
+        echo "Docker not installed, skipping"
+      fi
+    continue_on_error: true
+
+  - name: Check certificate expiry
+    run: |
+      for cert in /etc/ssl/certs/*.pem /etc/letsencrypt/live/*/fullchain.pem; do
+        if [ -f "$cert" ]; then
+          EXPIRY=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2)
+          EXPIRY_EPOCH=$(date -d "$EXPIRY" +%s 2>/dev/null || date -jf "%b %d %T %Y %Z" "$EXPIRY" +%s 2>/dev/null)
+          NOW=$(date +%s)
+          DAYS_LEFT=$(( (EXPIRY_EPOCH - NOW) / 86400 ))
+          if [ "$DAYS_LEFT" -lt 30 ]; then
+            echo "WARNING: $cert expires in $DAYS_LEFT days"
+          fi
+        fi
+      done
+      echo "Certificate check complete"
+    continue_on_error: true
+
+  - name: Notify results
+    notify: slack
+    message: "Fleet health check complete. Disk report: {{disk_report}}"
