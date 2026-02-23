@@ -75,7 +75,7 @@ func NewAgentInstance(
 
 	maxIter := defaults.MaxToolIterations
 	if maxIter == 0 {
-		maxIter = 20
+		maxIter = 10
 	}
 
 	maxTokens := defaults.MaxTokens

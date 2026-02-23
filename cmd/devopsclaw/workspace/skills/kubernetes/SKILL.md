@@ -296,3 +296,8 @@ spec:
 - Use `kubectx` and `kubens` for fast context/namespace switching.
 - Always set resource requests and limits in production.
 - Use `--dry-run=client -o yaml` to generate YAML: `kubectl create deploy web --image=nginx --dry-run=client -o yaml`.
+
+## Bundled Scripts
+
+- Wait for rollout: `{baseDir}/scripts/wait-for-rollout.sh -n namespace -d deployment`
+- Pod health check: `{baseDir}/scripts/pod-health-check.sh -n namespace` (use `-n all` for all namespaces)

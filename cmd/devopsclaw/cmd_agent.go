@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -87,34 +88,49 @@ func agentCmd() {
 
 	// Set up real-time event rendering — this is what makes it feel like Claude Code.
 	// Every tool call, result, and iteration is visible to the user as it happens.
+	//
+	// spinnerActive is shared with the spinner goroutine so event output
+	// can clear the spinner line before printing, preventing overlap.
+	var spinnerActive atomic.Bool
+
+	clearSpinnerLine := func() {
+		if spinnerActive.Load() {
+			// Erase the current line the spinner wrote on
+			fmt.Printf("\r\033[K")
+		}
+	}
+
 	agentLoop.SetEventCallback(func(event agent.AgentEvent) {
 		switch event.Type {
 		case agent.EventThinking:
 			if event.Iteration > 1 {
-				// Show iteration counter for multi-step agentic work
+				clearSpinnerLine()
 				fmt.Printf("  %s\n", chat.RenderIterationBadge(event.Iteration, event.MaxIter))
 			}
 		case agent.EventToolCall:
+			clearSpinnerLine()
 			fmt.Println(chat.RenderToolCall(event.ToolName, event.ToolArgs))
 		case agent.EventToolResult:
 			if event.ToolOutput != "" {
+				clearSpinnerLine()
 				fmt.Println(chat.RenderToolOutput(event.ToolOutput, event.IsError))
 			}
 		case agent.EventToolDenied:
+			clearSpinnerLine()
 			fmt.Println(chat.RenderToolDenied(event.ToolName, event.DenyReason))
 		case agent.EventResponse:
-			// Rendered by the main flow after ProcessDirect returns.
-			// But show usage stats if available.
 			if event.TotalTokens > 0 {
+				clearSpinnerLine()
 				fmt.Println(chat.RenderUsage(event.PromptTokens, event.CompletionTokens, event.TotalTokens))
 			}
 		case agent.EventError:
+			clearSpinnerLine()
 			fmt.Println(chat.RenderError(event.Content))
 		}
 	})
 
 	// Set up human-in-the-loop confirmation with styled prompt
-	agentLoop.SetConfirmCallback(func(toolName string, args map[string]any) bool {
+	agentLoop.SetConfirmCallback(func(toolName string, args map[string]any) agent.ConfirmResult {
 		preview := ""
 		switch toolName {
 		case "exec":
@@ -131,31 +147,28 @@ func agentCmd() {
 			}
 		}
 
+		clearSpinnerLine()
 		fmt.Print(chat.RenderConfirm(toolName, preview))
 
 		reader := bufio.NewReader(os.Stdin)
 		line, _ := reader.ReadString('\n')
 		answer := strings.TrimSpace(strings.ToLower(line))
-		return answer == "" || answer == "y" || answer == "yes"
+		switch answer {
+		case "", "y", "yes":
+			return agent.ConfirmAllow
+		case "a", "always":
+			return agent.ConfirmAllowSession
+		default:
+			return agent.ConfirmDeny
+		}
 	})
 
-	// Gather startup info
+	// Gather startup info (used for one-shot banner, not needed for TUI mode)
 	startupInfo := agentLoop.GetStartupInfo()
-	toolCount := 0
-	skillCount := 0
-	if t, ok := startupInfo["tools"].(map[string]any); ok {
-		if c, ok := t["count"].(int); ok {
-			toolCount = c
-		}
-	}
-	if s, ok := startupInfo["skills"].(map[string]any); ok {
-		if c, ok := s["available"].(int); ok {
-			skillCount = c
-		}
-	}
+	_ = startupInfo
 
 	if message != "" {
-		// One-shot mode — minimal UI
+		// One-shot mode — minimal UI (print-based)
 		ctx := context.Background()
 		response, err := agentLoop.ProcessDirect(ctx, message, sessionKey)
 		if err != nil {
@@ -164,18 +177,144 @@ func agentCmd() {
 		}
 		fmt.Print(chat.RenderAgentResponse(response))
 	} else {
-		// Interactive mode — full styled UI
-		fmt.Print(chat.RenderBanner(
-			formatVersion(),
-			cfg.Agents.Defaults.Model,
-			toolCount,
-			skillCount,
-		))
-		interactiveMode(agentLoop, sessionKey, chat)
+		// Interactive mode — full-screen Bubble Tea TUI (claudechic replica)
+		interactiveModeTUI(agentLoop, sessionKey, cfg.Agents.Defaults.Model)
 	}
 }
 
-func interactiveMode(agentLoop *agent.AgentLoop, sessionKey string, chat *tui.ChatRenderer) {
+// interactiveModeTUI launches the full-screen Bubble Tea chat, replicating claudechic.
+func interactiveModeTUI(agentLoop *agent.AgentLoop, sessionKey, modelName string) {
+	p, promptCh := tui.RunChatApp(modelName)
+
+	// Wire agent events → Bubble Tea messages
+	agentLoop.SetEventCallback(func(event agent.AgentEvent) {
+		switch event.Type {
+		case agent.EventThinking:
+			p.Send(tui.ThinkingMsg{Active: true})
+			if event.Iteration > 1 {
+				p.Send(tui.AppendChatMsg{Msg: tui.ChatMsg{
+					Role:    "system",
+					Content: fmt.Sprintf("── step %d/%d ──", event.Iteration, event.MaxIter),
+					Time:    time.Now(),
+				}})
+			}
+		case agent.EventToolCall:
+			p.Send(tui.AppendChatMsg{Msg: tui.ChatMsg{
+				Role:     "tool",
+				ToolName: event.ToolName,
+				ToolArgs: event.ToolArgs,
+				Time:     time.Now(),
+			}})
+		case agent.EventToolResult:
+			if event.ToolOutput != "" {
+				p.Send(tui.AppendChatMsg{Msg: tui.ChatMsg{
+					Role:    "tool",
+					Content: event.ToolOutput,
+					IsError: event.IsError,
+					Time:    time.Now(),
+				}})
+			}
+		case agent.EventToolDenied:
+			p.Send(tui.AppendChatMsg{Msg: tui.ChatMsg{
+				Role:    "error",
+				Content: fmt.Sprintf("✗ %s – %s", event.ToolName, event.DenyReason),
+				Time:    time.Now(),
+			}})
+		case agent.EventResponse:
+			if event.TotalTokens > 0 {
+				p.Send(tui.UsageMsg{
+					Prompt:     event.PromptTokens,
+					Completion: event.CompletionTokens,
+					Total:      event.TotalTokens,
+				})
+			}
+		case agent.EventError:
+			p.Send(tui.AppendChatMsg{Msg: tui.ChatMsg{
+				Role:    "error",
+				Content: event.Content,
+				Time:    time.Now(),
+			}})
+		}
+	})
+
+	// Wire confirmation requests → Bubble Tea confirm prompt
+	agentLoop.SetConfirmCallback(func(toolName string, args map[string]any) agent.ConfirmResult {
+		preview := ""
+		switch toolName {
+		case "exec":
+			if cmd, ok := args["command"].(string); ok {
+				preview = cmd
+			}
+		case "write_file", "edit_file", "append_file":
+			if path, ok := args["path"].(string); ok {
+				preview = path
+			}
+		case "web_fetch", "browser":
+			if u, ok := args["url"].(string); ok {
+				preview = u
+			}
+		}
+
+		var result agent.ConfirmResult
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		p.Send(tui.ConfirmRequestMsg{
+			ToolName: toolName,
+			Preview:  preview,
+			Respond: func(choice tui.ConfirmChoice) {
+				switch choice {
+				case tui.ConfirmYes:
+					result = agent.ConfirmAllow
+				case tui.ConfirmNo:
+					result = agent.ConfirmDeny
+				case tui.ConfirmAlwaysSession:
+					result = agent.ConfirmAllowSession
+				}
+				wg.Done()
+			},
+		})
+
+		wg.Wait()
+		return result
+	})
+
+	// Goroutine: read prompts from TUI and feed to agent loop
+	go func() {
+		for text := range promptCh {
+			p.Send(tui.ThinkingMsg{Active: true})
+
+			ctx := context.Background()
+			response, err := agentLoop.ProcessDirect(ctx, text, sessionKey)
+
+			p.Send(tui.ThinkingMsg{Active: false})
+
+			if err != nil {
+				p.Send(tui.AppendChatMsg{Msg: tui.ChatMsg{
+					Role:    "error",
+					Content: err.Error(),
+					Time:    time.Now(),
+				}})
+				continue
+			}
+
+			p.Send(tui.AppendChatMsg{Msg: tui.ChatMsg{
+				Role:    "assistant",
+				Content: response,
+				Time:    time.Now(),
+			}})
+		}
+	}()
+
+	// Run the Bubble Tea program (blocks until quit)
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// interactiveModeReadline is the fallback readline-based interactive mode.
+func interactiveModeReadline(agentLoop *agent.AgentLoop, sessionKey string, chat *tui.ChatRenderer, spinnerActive *atomic.Bool) {
 	// Use ANSI escape for a colored prompt — lipgloss styles don't work with readline.
 	prompt := "\033[38;2;135;206;235m❯\033[0m "
 
@@ -217,25 +356,25 @@ func interactiveMode(agentLoop *agent.AgentLoop, sessionKey string, chat *tui.Ch
 		// Show user message
 		fmt.Print(chat.RenderUserMessage(input))
 
-		// Start a subtle spinner — it will be interrupted by event output
+		// Start a subtle spinner
 		var spinnerDone atomic.Bool
+		spinnerActive.Store(true)
 		go func() {
 			frame := 0
-			// Only show spinner before first event arrives
 			time.Sleep(300 * time.Millisecond)
 			for !spinnerDone.Load() {
-				fmt.Printf("\r%s", chat.RenderThinking(frame))
+				fmt.Printf("\r\033[K%s", chat.RenderThinking(frame))
 				frame = tui.SpinnerTick(frame)
 				time.Sleep(80 * time.Millisecond)
 			}
-			fmt.Printf("\r%s\r", strings.Repeat(" ", 40))
+			fmt.Printf("\r\033[K")
 		}()
 
 		ctx := context.Background()
 		response, err := agentLoop.ProcessDirect(ctx, input, sessionKey)
 
-		// Stop spinner
 		spinnerDone.Store(true)
+		spinnerActive.Store(false)
 		time.Sleep(100 * time.Millisecond)
 
 		if err != nil {

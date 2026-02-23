@@ -205,3 +205,8 @@ ORDER BY n_dead_tup DESC LIMIT 10;"
 - Use `pg_dump -Fc` (custom format) — it supports parallel restore with `-j`.
 - Monitor `n_dead_tup` — high values mean autovacuum may need tuning.
 - Use connection pooling (PgBouncer) in production.
+
+## Bundled Scripts
+
+- Health check: `{baseDir}/scripts/pg-health.sh -H host -d dbname` (connections, replication, long queries, cache ratio)
+- Slow query analysis: `{baseDir}/scripts/pg-slow-queries.sh -d dbname` (requires pg_stat_statements)

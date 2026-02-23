@@ -1,0 +1,744 @@
+// Package tui – chat_app.go
+// Full-screen Bubble Tea chat TUI — faithful Go replica of claudechic.
+//
+// Layout (mirrors claudechic/screens/chat.py + styles.tcss):
+//
+//	┌──────────────────────────────────────────┐
+//	│  (scrollable chat view)                  │
+//	│  ┃ user message (thick orange border)    │
+//	│  │ assistant reply (wide blue border)    │
+//	│  │ tool call (wide gray border)          │
+//	│  ┃ error (thick red border)              │
+//	│                                          │
+//	│  ⠋ thinking…                             │
+//	│  ┌────────────────────────────────────┐  │
+//	│  │ > input area                       │  │
+//	│  └────────────────────────────────────┘  │
+//	│  model · Auto-edit: off    ░░░░ 12%      │
+//	└──────────────────────────────────────────┘
+package tui
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// ─── Message types ─────────────────────────────────────────────────────
+
+// ChatMsg represents a message in the chat history.
+type ChatMsg struct {
+	Role    string         // "user", "assistant", "tool", "error", "system", "system-warn", "summary", "confirm"
+	Content string         // text content or markdown
+	ToolName string        // for tool messages
+	ToolArgs map[string]any // for tool messages
+	IsError  bool          // for tool results
+	Time     time.Time
+}
+
+// AppendChatMsg is a tea.Msg that adds a message to the chat.
+type AppendChatMsg struct{ Msg ChatMsg }
+
+// ThinkingMsg toggles the thinking indicator.
+type ThinkingMsg struct{ Active bool }
+
+// ContextUpdateMsg updates context usage in the footer.
+type ContextUpdateMsg struct{ Pct float64 }
+
+// UsageMsg shows token usage.
+type UsageMsg struct{ Prompt, Completion, Total int }
+
+// ResponseDoneMsg signals the agent finished responding.
+type ResponseDoneMsg struct{}
+
+// ConfirmRequestMsg asks the user for tool confirmation.
+type ConfirmRequestMsg struct {
+	ToolName string
+	Preview  string
+	Respond  func(ConfirmChoice)
+}
+
+// ConfirmChoice is the user's answer to a confirm prompt.
+type ConfirmChoice int
+
+const (
+	ConfirmYes ConfirmChoice = iota
+	ConfirmNo
+	ConfirmAlwaysSession
+)
+
+// SendPromptMsg is emitted when the user presses Enter.
+type SendPromptMsg struct{ Text string }
+
+// tickMsg drives the spinner animation.
+type spinTickMsg time.Time
+
+// ─── Main model ────────────────────────────────────────────────────────
+
+// ChatApp is the Bubble Tea model for the agent chat interface.
+// It closely mirrors claudechic's ChatScreen + ChatApp composition.
+type ChatApp struct {
+	// Dimensions
+	width, height int
+
+	// Chat history (rendered blocks)
+	messages []ChatMsg
+	chatView viewport.Model // scrollable viewport
+
+	// Input
+	input    textarea.Model
+	focused  bool
+
+	// State
+	thinking      bool
+	spinnerFrame  int
+	contextPct    float64
+	model         string
+	permMode      string // "default", "acceptEdits", "plan"
+	quitting      bool
+
+	// Confirm state
+	confirmActive  bool
+	confirmName    string
+	confirmPreview string
+	confirmCb      func(ConfirmChoice)
+
+	// Rendering
+	md *glamour.TermRenderer
+
+	// Prompt channel (user input goes here for external consumer)
+	promptCh chan<- string
+
+	// Callbacks
+	OnSend func(text string) // called when user submits input
+}
+
+// NewChatApp creates a fully initialized chat TUI model.
+func NewChatApp(modelName string) ChatApp {
+	// Textarea input — bottom-docked, like claudechic #input
+	ti := textarea.New()
+	ti.Placeholder = "Type a message · /help · ctrl-c to quit"
+	ti.CharLimit = 0
+	ti.SetHeight(1)
+	ti.ShowLineNumbers = false
+	ti.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ti.FocusedStyle.Base = lipgloss.NewStyle().Foreground(ColorText)
+	ti.BlurredStyle.Base = lipgloss.NewStyle().Foreground(ColorMuted)
+	ti.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(ColorMuted)
+	ti.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(ColorMuted)
+	ti.Focus()
+
+	// Viewport for chat messages
+	vp := viewport.New(80, 20)
+	vp.Style = lipgloss.NewStyle()
+
+	// Glamour markdown renderer
+	cw := 90
+	md, _ := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(cw),
+	)
+
+	return ChatApp{
+		width:    80,
+		height:   24,
+		input:    ti,
+		focused:  true,
+		chatView: vp,
+		model:    modelName,
+		permMode: "default",
+		md:       md,
+	}
+}
+
+func (m ChatApp) Init() tea.Cmd {
+	return tea.Batch(
+		textarea.Blink,
+		tickSpinner(),
+	)
+}
+
+func tickSpinner() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
+		return spinTickMsg(t)
+	})
+}
+
+// ─── Update ────────────────────────────────────────────────────────────
+
+func (m ChatApp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m = m.recalcLayout()
+		return m, nil
+
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+
+	case spinTickMsg:
+		if m.thinking {
+			m.spinnerFrame = (m.spinnerFrame + 1) % len(SpinnerFrameSet)
+		}
+		return m, tickSpinner()
+
+	case AppendChatMsg:
+		m.messages = append(m.messages, msg.Msg)
+		m = m.rebuildChatContent()
+		return m, nil
+
+	case ThinkingMsg:
+		m.thinking = msg.Active
+		if !msg.Active {
+			m.spinnerFrame = 0
+		}
+		return m, nil
+
+	case ContextUpdateMsg:
+		m.contextPct = msg.Pct
+		return m, nil
+
+	case UsageMsg:
+		usage := ChatMsg{
+			Role:    "system",
+			Content: fmtUsage(msg.Prompt, msg.Completion, msg.Total),
+			Time:    time.Now(),
+		}
+		m.messages = append(m.messages, usage)
+		m = m.rebuildChatContent()
+		return m, nil
+
+	case ResponseDoneMsg:
+		m.thinking = false
+		return m, nil
+
+	case ConfirmRequestMsg:
+		m.confirmActive = true
+		m.confirmName = msg.ToolName
+		m.confirmPreview = msg.Preview
+		m.confirmCb = msg.Respond
+		return m, nil
+	}
+
+	// Delegate to textarea
+	if m.focused && !m.confirmActive {
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+func (m ChatApp) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	// Confirm mode key handling
+	if m.confirmActive {
+		switch key {
+		case "y", "enter":
+			m.confirmActive = false
+			if m.confirmCb != nil {
+				m.confirmCb(ConfirmYes)
+			}
+		case "n", "esc":
+			m.confirmActive = false
+			if m.confirmCb != nil {
+				m.confirmCb(ConfirmNo)
+			}
+		case "a":
+			m.confirmActive = false
+			if m.confirmCb != nil {
+				m.confirmCb(ConfirmAlwaysSession)
+			}
+		}
+		return m, nil
+	}
+
+	switch key {
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+
+	case "enter":
+		text := strings.TrimSpace(m.input.Value())
+		if text == "" {
+			return m, nil
+		}
+		m.input.Reset()
+		m.input.SetHeight(1)
+		// Add user message
+		m.messages = append(m.messages, ChatMsg{
+			Role:    "user",
+			Content: text,
+			Time:    time.Now(),
+		})
+		m = m.rebuildChatContent()
+		// Send to prompt channel (for agent loop consumer)
+		if m.promptCh != nil {
+			m.promptCh <- text
+		}
+		// Notify callback (if set)
+		if m.OnSend != nil {
+			go m.OnSend(text)
+		}
+		return m, nil
+
+	case "pgup", "shift+pgup":
+		m.chatView.HalfViewUp()
+		return m, nil
+
+	case "pgdown", "shift+pgdown":
+		m.chatView.HalfViewDown()
+		return m, nil
+
+	default:
+		// Grow textarea up to 10 lines
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		lines := strings.Count(m.input.Value(), "\n") + 1
+		if lines > 10 {
+			lines = 10
+		}
+		if lines < 1 {
+			lines = 1
+		}
+		m.input.SetHeight(lines)
+		return m, cmd
+	}
+}
+
+// ─── View ──────────────────────────────────────────────────────────────
+
+func (m ChatApp) View() string {
+	if m.quitting {
+		return MutedText.Render("  👋 Goodbye!") + "\n"
+	}
+
+	contentW := MaxContentWidth(m.width)
+
+	// Build sections top-to-bottom
+	var sections []string
+
+	// 1. Chat viewport
+	sections = append(sections, m.chatView.View())
+
+	// 2. Thinking indicator (1 line, above input)
+	thinkLine := m.renderThinking(contentW)
+	sections = append(sections, thinkLine)
+
+	// 3. Confirm prompt (if active, replaces input)
+	if m.confirmActive {
+		sections = append(sections, m.renderConfirmPrompt(contentW))
+	} else {
+		// 4. Input box
+		sections = append(sections, m.renderInput(contentW))
+	}
+
+	// 5. Footer bar
+	sections = append(sections, m.renderFooter())
+
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// ─── Layout recalculation ──────────────────────────────────────────────
+
+func (m ChatApp) recalcLayout() ChatApp {
+	contentW := MaxContentWidth(m.width)
+
+	// Input area height: 1-10 lines + 2 border
+	inputLines := strings.Count(m.input.Value(), "\n") + 1
+	if inputLines > 10 {
+		inputLines = 10
+	}
+	inputH := inputLines + 2
+
+	// Footer = 1, thinking indicator = 1
+	chatH := m.height - inputH - 1 - 1
+	if chatH < 3 {
+		chatH = 3
+	}
+
+	m.chatView.Width = contentW
+	m.chatView.Height = chatH
+
+	m.input.SetWidth(contentW - 4) // account for border + padding
+
+	m = m.rebuildChatContent()
+	return m
+}
+
+// ─── Chat content rendering ────────────────────────────────────────────
+
+func (m ChatApp) rebuildChatContent() ChatApp {
+	contentW := MaxContentWidth(m.width) - 4 // border + padding
+	if contentW < 30 {
+		contentW = 30
+	}
+
+	var blocks []string
+
+	for _, msg := range m.messages {
+		block := m.renderMessage(msg, contentW)
+		blocks = append(blocks, block)
+	}
+
+	content := strings.Join(blocks, "\n")
+	m.chatView.SetContent(content)
+	m.chatView.GotoBottom()
+	return m
+}
+
+func (m ChatApp) renderMessage(msg ChatMsg, w int) string {
+	switch msg.Role {
+	case "user":
+		ts := MutedText.Render(msg.Time.Format("15:04"))
+		label := PrimaryText.Render("❯ You") + " " + ts
+		body := NormalText.Width(w).Render(msg.Content)
+		return "\n" + UserBlockStyle.Width(w + 2).Render(label+"\n"+body) + "\n"
+
+	case "assistant":
+		body := msg.Content
+		if m.md != nil {
+			if rendered, err := m.md.Render(msg.Content); err == nil {
+				body = strings.TrimRight(rendered, "\n")
+			}
+		}
+		return AssistantBlockStyle.Width(w + 2).Render(body)
+
+	case "summary":
+		body := msg.Content
+		if m.md != nil {
+			if rendered, err := m.md.Render(msg.Content); err == nil {
+				body = strings.TrimRight(rendered, "\n")
+			}
+		}
+		return "\n" + SummaryBlockStyle.Width(w + 2).Render(body) + "\n"
+
+	case "tool":
+		header := formatToolHdr(msg.ToolName, msg.ToolArgs)
+		var inner strings.Builder
+		inner.WriteString(ToolHdrText.Render(header))
+		if msg.ToolName == "exec" {
+			if cmd, ok := msg.ToolArgs["command"].(string); ok {
+				inner.WriteString("\n")
+				inner.WriteString(MutedText.Render("$ " + cmd))
+			}
+		}
+		if msg.Content != "" {
+			// Tool output
+			text := truncateOutput(msg.Content, 15)
+			inner.WriteString("\n" + PanelText.Render("───") + "\n")
+			inner.WriteString(NormalText.Width(w).Render(text))
+			summary := fmtResultSummary(msg.Content, msg.IsError)
+			if summary != "" {
+				inner.WriteString("\n" + MutedText.Render(summary))
+			}
+		}
+		if msg.IsError {
+			return ErrorBlockStyle.Width(w + 2).Render(inner.String())
+		}
+		return ToolBlockStyle.Width(w + 2).Render(inner.String())
+
+	case "error":
+		return ErrorBlockStyle.Width(w + 2).Render(
+			ErrorText.Render("Error: " + msg.Content))
+
+	case "system":
+		return SystemBlockStyle.Width(w + 2).Render(msg.Content)
+
+	case "system-warn":
+		return SystemWarnBlockStyle.Width(w + 2).Render(msg.Content)
+
+	case "confirm":
+		return m.renderConfirmBlock(msg, w)
+
+	default:
+		return NormalText.Render(msg.Content)
+	}
+}
+
+func (m ChatApp) renderConfirmBlock(msg ChatMsg, w int) string {
+	promptW := w
+	if promptW > 90 {
+		promptW = 90
+	}
+	optW := promptW - 6
+
+	title := PromptTitleStyle.Render("Allow " + msg.ToolName + "?")
+	var previewLine string
+	if msg.Content != "" {
+		previewLine = MutedText.Render(msg.Content)
+	}
+
+	opt1 := PromptOptionSelectedStyle.Width(optW).Render(
+		lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary).Render("y") + "  " + NormalText.Render("Yes, allow this time"))
+	opt2 := PromptOptionStyle.Width(optW).Render(
+		lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary).Render("a") + "  " + MutedText.Render("Always allow in this session"))
+	opt3 := PromptOptionStyle.Width(optW).Render(
+		lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("n") + "  " + MutedText.Render("No, deny"))
+
+	var inner strings.Builder
+	inner.WriteString(title)
+	if previewLine != "" {
+		inner.WriteString("\n" + previewLine)
+	}
+	inner.WriteString("\n\n")
+	inner.WriteString(opt1 + "\n")
+	inner.WriteString(opt2 + "\n")
+	inner.WriteString(opt3)
+
+	return "\n" + ConfirmBlockStyle.Width(promptW).Render(inner.String())
+}
+
+// ─── Thinking indicator ────────────────────────────────────────────────
+
+func (m ChatApp) renderThinking(w int) string {
+	if !m.thinking {
+		// Reserve 1 line of space
+		return strings.Repeat(" ", w)
+	}
+	frame := SpinnerFrameSet[m.spinnerFrame%len(SpinnerFrameSet)]
+	return MutedText.Render(fmt.Sprintf("  %s thinking…", frame))
+}
+
+// ─── Input box ─────────────────────────────────────────────────────────
+
+func (m ChatApp) renderInput(contentW int) string {
+	style := InputBoxFocusedStyle.Width(contentW - 2)
+	if !m.focused {
+		style = InputBoxStyle.Width(contentW - 2)
+	}
+	return style.Render(m.input.View())
+}
+
+// ─── Confirm prompt (overlay) ──────────────────────────────────────────
+
+func (m ChatApp) renderConfirmPrompt(contentW int) string {
+	promptW := contentW
+	if promptW > 90 {
+		promptW = 90
+	}
+	optW := promptW - 6
+
+	title := PromptTitleStyle.Render("Allow " + m.confirmName + "?")
+	var previewLine string
+	if m.confirmPreview != "" {
+		previewLine = MutedText.Render(m.confirmPreview)
+	}
+
+	// Each option is a prompt-option row with tall left border;
+	// the first (default) option is highlighted.
+	opt1 := PromptOptionSelectedStyle.Width(optW).Render(
+		lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary).Render("y") + "  " + NormalText.Render("Yes, allow this time"))
+	opt2 := PromptOptionStyle.Width(optW).Render(
+		lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary).Render("a") + "  " + MutedText.Render("Always allow in this session"))
+	opt3 := PromptOptionStyle.Width(optW).Render(
+		lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("n") + "  " + MutedText.Render("No, deny"))
+
+	var inner strings.Builder
+	inner.WriteString(title)
+	if previewLine != "" {
+		inner.WriteString("\n" + previewLine)
+	}
+	inner.WriteString("\n\n")
+	inner.WriteString(opt1 + "\n")
+	inner.WriteString(opt2 + "\n")
+	inner.WriteString(opt3)
+
+	return ConfirmBlockStyle.Width(promptW).Render(inner.String())
+}
+
+// ─── Footer ────────────────────────────────────────────────────────────
+// claudechic StatusFooter: model · permission-mode · (spacer) · context-bar · branch
+
+func (m ChatApp) renderFooter() string {
+	w := m.width
+	if w <= 0 {
+		w = 80
+	}
+
+	modelLabel := MutedText.Render(m.model)
+	sep := PanelText.Render("·")
+
+	permLabel := "Auto-edit: off"
+	permStyle := MutedText
+	switch m.permMode {
+	case "acceptEdits":
+		permLabel = "Auto-edit: on"
+		permStyle = lipgloss.NewStyle().Foreground(ColorPrimary)
+	case "plan":
+		permLabel = "Plan mode"
+		permStyle = lipgloss.NewStyle().Foreground(ColorSecondary)
+	}
+	permRendered := permStyle.Render(permLabel)
+
+	contextBar := renderCtxBar(m.contextPct)
+
+	left := fmt.Sprintf(" %s %s %s", modelLabel, sep, permRendered)
+	right := fmt.Sprintf("%s ", contextBar)
+
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+
+	return FooterStyle.Width(w).Render(
+		left + strings.Repeat(" ", gap) + right,
+	)
+}
+
+// ─── Context bar ───────────────────────────────────────────────────────
+// Mirrors claudechic ContextBar indicator
+
+func renderCtxBar(pct float64) string {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 1 {
+		pct = 1
+	}
+	barWidth := 10
+	filled := int(pct * float64(barWidth))
+
+	var fillColor, emptyColor lipgloss.Color
+	switch {
+	case pct < 0.5:
+		fillColor = lipgloss.Color("#666666")
+	case pct < 0.8:
+		fillColor = ColorWarn
+	default:
+		fillColor = ColorError
+	}
+	emptyColor = lipgloss.Color("#333333")
+
+	var bar strings.Builder
+	pctStr := fmt.Sprintf("%2.0f%%", pct*100)
+	start := (barWidth - len(pctStr)) / 2
+
+	for i := 0; i < barWidth; i++ {
+		bg := emptyColor
+		if i < filled {
+			bg = fillColor
+		}
+		fg := ColorText
+		if start <= i && i < start+len(pctStr) {
+			ch := string(pctStr[i-start])
+			bar.WriteString(lipgloss.NewStyle().
+				Foreground(fg).Background(bg).Render(ch))
+		} else {
+			bar.WriteString(lipgloss.NewStyle().
+				Background(bg).Render(" "))
+		}
+	}
+	return bar.String()
+}
+
+// ─── Formatting helpers ────────────────────────────────────────────────
+// Ported from claudechic/formatting.py
+
+func formatToolHdr(name string, args map[string]any) string {
+	switch name {
+	case "exec":
+		if d, ok := args["description"].(string); ok && d != "" {
+			return "▸ " + name + " " + truncStr(d, 60)
+		}
+		if cmd, ok := args["command"].(string); ok {
+			return "▸ " + name + " " + truncStr(cmd, 60)
+		}
+	case "read_file", "write_file", "edit_file", "append_file", "list_dir":
+		if p, ok := args["path"].(string); ok {
+			return "▸ " + name + " " + p
+		}
+	case "web_search":
+		if q, ok := args["query"].(string); ok {
+			return "▸ " + name + " " + truncStr(q, 60)
+		}
+	case "web_fetch", "browser":
+		if u, ok := args["url"].(string); ok {
+			return "▸ " + name + " " + truncStr(u, 60)
+		}
+	case "message":
+		if ct, ok := args["content"].(string); ok {
+			return "▸ " + name + " " + truncStr(ct, 40)
+		}
+	case "spawn":
+		if d, ok := args["description"].(string); ok && d != "" {
+			return "▸ " + name + " " + truncStr(d, 50)
+		}
+	}
+	return "▸ " + name
+}
+
+func fmtResultSummary(content string, isError bool) string {
+	if isError {
+		return "(error)"
+	}
+	stripped := strings.TrimSpace(content)
+	if stripped == "" {
+		return "(no output)"
+	}
+	lines := strings.Split(stripped, "\n")
+	return fmt.Sprintf("(%d lines)", len(lines))
+}
+
+func truncateOutput(output string, maxLines int) string {
+	lines := strings.Split(output, "\n")
+	if len(lines) <= maxLines {
+		return output
+	}
+	total := len(lines)
+	text := strings.Join(lines[:maxLines], "\n")
+	text += "\n" + MutedText.Render(fmt.Sprintf("… %d more lines", total-maxLines))
+	return text
+}
+
+func truncStr(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
+}
+
+func fmtTokCount(n int) string {
+	if n >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	}
+	if n >= 1_000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+func fmtUsage(prompt, completion, total int) string {
+	return fmt.Sprintf(
+		"  %s prompt · %s completion · %s total",
+		fmtTokCount(prompt), fmtTokCount(completion), fmtTokCount(total),
+	)
+}
+
+// ─── Public API for external callers ───────────────────────────────────
+
+// RunChatApp starts the full-screen Bubble Tea chat TUI.
+// Returns the tea.Program for sending messages, and a channel
+// that emits user-submitted prompts.
+func RunChatApp(modelName string) (*tea.Program, <-chan string) {
+	promptCh := make(chan string, 10)
+	app := NewChatApp(modelName)
+	app.promptCh = promptCh
+	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	return p, promptCh
+}

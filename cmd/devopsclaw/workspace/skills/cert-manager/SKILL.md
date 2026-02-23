@@ -206,3 +206,7 @@ cmctl renew app-tls -n my-app
 - Use `cert-manager.io/cluster-issuer` annotation on Ingress for automatic certificate creation.
 - For DNS01 challenges (wildcards), configure a DNS provider (Route53, CloudDNS, Cloudflare).
 - Install `cmctl` for cert-manager-specific CLI operations.
+
+## Bundled Scripts
+
+- Check certificate expiry: `{baseDir}/scripts/check-cert-expiry.sh` (add `-w 30` to set warning threshold in days)

@@ -40,16 +40,26 @@ type AgentLoop struct {
 	summarizing    sync.Map
 	fallback       *providers.FallbackChain
 	channelManager *channels.Manager
-	toolGuard      *rbac.ToolGuard
-	confirmCb      ToolConfirmCallback
-	eventCb        EventCallback
+	toolGuard       *rbac.ToolGuard
+	confirmCb       ToolConfirmCallback
+	eventCb         EventCallback
+	sessionAllowed  map[string]bool // tools the user allowed for the whole session
 	totalUsage     usageAccumulator
 }
 
+// ConfirmResult represents the user's decision on a tool confirmation prompt.
+type ConfirmResult int
+
+const (
+	ConfirmDeny         ConfirmResult = iota // deny this invocation
+	ConfirmAllow                             // allow this one invocation
+	ConfirmAllowSession                      // allow this tool for the rest of the session
+)
+
 // ToolConfirmCallback is invoked before executing tools that require human approval.
-// It receives the tool name and arguments, and returns true if the user approves.
+// It receives the tool name and arguments, and returns the user's decision.
 // If nil, all tools execute without confirmation (backward-compatible).
-type ToolConfirmCallback func(toolName string, args map[string]any) bool
+type ToolConfirmCallback func(toolName string, args map[string]any) ConfirmResult
 
 // toolsRequiringConfirmation is the set of tool names that should prompt for user approval.
 var toolsRequiringConfirmation = map[string]bool{
@@ -96,13 +106,14 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 	toolGuard := rbac.NewToolGuard(enforcer, cfg.RBAC.Enabled)
 
 	return &AgentLoop{
-		bus:         msgBus,
-		cfg:         cfg,
-		registry:    registry,
-		state:       stateManager,
-		summarizing: sync.Map{},
-		fallback:    fallbackChain,
-		toolGuard:   toolGuard,
+		bus:            msgBus,
+		cfg:            cfg,
+		registry:       registry,
+		state:          stateManager,
+		summarizing:    sync.Map{},
+		fallback:       fallbackChain,
+		toolGuard:      toolGuard,
+		sessionAllowed: make(map[string]bool),
 	}
 }
 
@@ -560,6 +571,12 @@ func (al *AgentLoop) runLLMIteration(
 	var finalContent string
 	al.totalUsage.Reset()
 
+	// Repetition detector: if the LLM calls the exact same tool with the
+	// exact same arguments 3+ times, it's stuck in a loop. Force-break
+	// by injecting a system nudge telling it to stop and summarize.
+	toolCallCounts := make(map[string]int) // key = "toolName:argsJSON"
+	const maxToolRepeat = 3
+
 	for iteration < agent.MaxIterations {
 		iteration++
 
@@ -715,6 +732,34 @@ func (al *AgentLoop) runLLMIteration(
 			normalizedToolCalls = append(normalizedToolCalls, providers.NormalizeToolCall(tc))
 		}
 
+		// ── Repetition detection ──────────────────────────────────────
+		// Build a fingerprint for this iteration's tool calls and check
+		// if we've seen the same set before too many times.
+		repeatDetected := false
+		for _, tc := range normalizedToolCalls {
+			argsBytes, _ := json.Marshal(tc.Arguments)
+			key := tc.Name + ":" + string(argsBytes)
+			toolCallCounts[key]++
+			if toolCallCounts[key] >= maxToolRepeat {
+				repeatDetected = true
+			}
+		}
+		if repeatDetected {
+			logger.WarnCF("agent", "Detected repeated tool call loop, forcing answer",
+				map[string]any{
+					"agent_id":  agent.ID,
+					"iteration": iteration,
+				})
+			// Inject a tool-result nudge telling the LLM to stop looping
+			nudge := providers.Message{
+				Role:    "user",
+				Content: "You are repeating the same tool call. Stop calling tools and provide the best answer you can with the information you already have.",
+			}
+			messages = append(messages, nudge)
+			// Give it one more chance to answer without tools
+			continue
+		}
+
 		// Log tool calls
 		toolNames := make([]string, 0, len(normalizedToolCalls))
 		for _, tc := range normalizedToolCalls {
@@ -808,13 +853,23 @@ func (al *AgentLoop) runLLMIteration(
 						ToolCallID: tc.ID,
 					}
 					messages = append(messages, toolResultMsg)
+					agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
 					continue
 				}
 			}
 
-			// Human confirmation check — prompt before executing destructive tools
-			if al.confirmCb != nil && toolsRequiringConfirmation[tc.Name] {
-				if !al.confirmCb(tc.Name, tc.Arguments) {
+			// Human confirmation check — prompt before executing destructive tools.
+			// Skip prompt if the user already chose "allow for session" for this tool.
+			if al.confirmCb != nil && toolsRequiringConfirmation[tc.Name] && !al.sessionAllowed[tc.Name] {
+				result := al.confirmCb(tc.Name, tc.Arguments)
+				switch result {
+				case ConfirmAllowSession:
+					al.sessionAllowed[tc.Name] = true
+					// fall through — execute the tool
+				case ConfirmAllow:
+					// one-time allow — execute the tool
+				default:
+					// ConfirmDeny
 					logger.InfoCF("agent", "User denied tool execution",
 						map[string]any{
 							"tool": tc.Name,

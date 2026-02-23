@@ -274,3 +274,8 @@ docker inspect --format='{{.State.Health.Status}}' my-app
 - Use `docker compose watch` for development with live reload.
 - Pin image tags in production — never use `:latest` in deployments.
 - Use `--no-cache` when debugging build issues: `docker build --no-cache .`.
+
+## Bundled Scripts
+
+- Cleanup dangling resources: `{baseDir}/scripts/cleanup-dangling.sh` (add `--dry-run` to preview)
+- Wait for container health: `{baseDir}/scripts/wait-healthy.sh -c container_name`

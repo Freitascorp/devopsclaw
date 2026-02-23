@@ -1,5 +1,8 @@
 // Package tui provides terminal UI components for DevOpsClaw using Bubble Tea.
-// Currently includes a fleet status dashboard with live node status.
+// Fleet dashboard styled with the claudechic visual language:
+//   - Left border bars for content sections
+//   - Chic color palette (primary=#cc7700, secondary=#5599dd, panel=#555555)
+//   - Minimal chrome, dark background
 package tui
 
 import (
@@ -14,56 +17,62 @@ import (
 )
 
 // ------------------------------------------------------------------
-// Styles
+// Styles – use shared palette from styles.go
 // ------------------------------------------------------------------
 
 var (
-	titleStyle = lipgloss.NewStyle().
+	// Title: primary orange
+	dTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FF6B6B")).
+			Foreground(ColorPrimary).
 			MarginBottom(1)
 
-	headerStyle = lipgloss.NewStyle().
+	// Table header: secondary blue
+	dHeaderStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#7B68EE")).
+			Foreground(ColorSecondary).
 			PaddingLeft(1).
 			PaddingRight(1)
 
-	onlineStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#00FF88"))
+	// Status colors – green/red kept for semantic clarity
+	dOnlineStyle = lipgloss.NewStyle().
+			Foreground(ColorSecondary) // secondary blue = healthy
 
-	offlineStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF4444"))
+	dOfflineStyle = lipgloss.NewStyle().
+			Foreground(ColorError) // red
 
-	degradedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFB347"))
+	dDegradedStyle = lipgloss.NewStyle().
+			Foreground(ColorWarn) // yellow
 
-	drainingStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#87CEEB"))
+	dDrainingStyle = lipgloss.NewStyle().
+			Foreground(ColorAccent) // muted blue-gray
 
-	unreachableStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#999999"))
+	dUnreachableStyle = lipgloss.NewStyle().
+			Foreground(ColorPanel) // gray
 
-	cellStyle = lipgloss.NewStyle().
+	dCellStyle = lipgloss.NewStyle().
 			PaddingLeft(1).
 			PaddingRight(1)
 
-	footerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#888888")).
+	dFooterStyle = lipgloss.NewStyle().
+			Foreground(ColorMuted).
 			MarginTop(1)
 
-	boxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#555555")).
-			Padding(0, 1)
+	// Summary box uses panel border (like claudechic tool blocks)
+	dBoxStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderLeft(true).
+			BorderTop(false).BorderBottom(false).BorderRight(false).
+			BorderForeground(ColorPanel).
+			PaddingLeft(1)
 
-	summaryOnline = lipgloss.NewStyle().
+	dSummaryOnline = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#00FF88"))
+			Foreground(ColorSecondary) // blue for online
 
-	summaryOffline = lipgloss.NewStyle().
+	dSummaryOffline = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FF4444"))
+			Foreground(ColorError)
 )
 
 // ------------------------------------------------------------------
@@ -148,39 +157,39 @@ func (m FleetDashboard) View() string {
 	var b strings.Builder
 
 	// Title
-	b.WriteString(titleStyle.Render("🦞 DevOpsClaw Fleet Dashboard"))
+	b.WriteString(dTitleStyle.Render("🦞 DevOpsClaw Fleet Dashboard"))
 	b.WriteString("\n")
 
-	// Summary bar
+	// Summary bar – left-border block (claudechic style)
 	if m.summary != nil {
 		summaryLine := fmt.Sprintf(
 			"%s  %s  %s  %s  %s",
-			summaryOnline.Render(fmt.Sprintf("● %d online", m.summary.Online)),
-			summaryOffline.Render(fmt.Sprintf("○ %d offline", m.summary.Offline)),
-			degradedStyle.Render(fmt.Sprintf("⚠ %d degraded", m.summary.Degraded)),
-			drainingStyle.Render(fmt.Sprintf("◐ %d draining", m.summary.Draining)),
-			unreachableStyle.Render(fmt.Sprintf("✗ %d unreachable", m.summary.Unreachable)),
+			dSummaryOnline.Render(fmt.Sprintf("● %d online", m.summary.Online)),
+			dSummaryOffline.Render(fmt.Sprintf("○ %d offline", m.summary.Offline)),
+			dDegradedStyle.Render(fmt.Sprintf("⚠ %d degraded", m.summary.Degraded)),
+			dDrainingStyle.Render(fmt.Sprintf("◐ %d draining", m.summary.Draining)),
+			dUnreachableStyle.Render(fmt.Sprintf("✗ %d unreachable", m.summary.Unreachable)),
 		)
-		b.WriteString(boxStyle.Render(fmt.Sprintf("Total: %d nodes  │  %s",
+		b.WriteString(dBoxStyle.Render(fmt.Sprintf("Total: %d nodes  │  %s",
 			m.summary.TotalNodes, summaryLine)))
 		b.WriteString("\n\n")
 	}
 
 	// Node table
 	if len(m.nodes) == 0 {
-		b.WriteString(footerStyle.Render("  No nodes registered. Use 'devopsclaw node register' to add nodes."))
+		b.WriteString(dFooterStyle.Render("  No nodes registered. Use 'devopsclaw node register' to add nodes."))
 		b.WriteString("\n")
 	} else {
 		// Header
 		header := fmt.Sprintf("%-20s %-14s %-30s %s",
-			headerStyle.Render("NODE"),
-			headerStyle.Render("STATUS"),
-			headerStyle.Render("LABELS"),
-			headerStyle.Render("LAST SEEN"),
+			dHeaderStyle.Render("NODE"),
+			dHeaderStyle.Render("STATUS"),
+			dHeaderStyle.Render("LABELS"),
+			dHeaderStyle.Render("LAST SEEN"),
 		)
 		b.WriteString(header)
 		b.WriteString("\n")
-		b.WriteString(strings.Repeat("─", clampInt(m.width, 85)))
+		b.WriteString(PanelText.Render(strings.Repeat("─", clampInt(m.width, 85))))
 		b.WriteString("\n")
 
 		// Rows
@@ -190,10 +199,10 @@ func (m FleetDashboard) View() string {
 			lastSeen := renderLastSeen(n.LastSeen)
 
 			row := fmt.Sprintf("%-20s %-14s %-30s %s",
-				cellStyle.Render(string(n.ID)),
+				dCellStyle.Render(string(n.ID)),
 				statusStr,
-				cellStyle.Render(labels),
-				cellStyle.Render(lastSeen),
+				dCellStyle.Render(labels),
+				dCellStyle.Render(lastSeen),
 			)
 			b.WriteString(row)
 			b.WriteString("\n")
@@ -202,7 +211,7 @@ func (m FleetDashboard) View() string {
 
 	// Footer
 	b.WriteString("\n")
-	b.WriteString(footerStyle.Render(fmt.Sprintf("  [r] refresh  [q] quit  │  Updated: %s",
+	b.WriteString(dFooterStyle.Render(fmt.Sprintf("  [r] refresh  [q] quit  │  Updated: %s",
 		time.Now().Format("15:04:05"))))
 
 	return b.String()
@@ -215,17 +224,17 @@ func (m FleetDashboard) View() string {
 func renderStatus(status fleet.NodeStatus) string {
 	switch status {
 	case fleet.NodeStatusOnline:
-		return onlineStyle.Render("● online")
+		return dOnlineStyle.Render("● online")
 	case fleet.NodeStatusOffline:
-		return offlineStyle.Render("○ offline")
+		return dOfflineStyle.Render("○ offline")
 	case fleet.NodeStatusDegraded:
-		return degradedStyle.Render("⚠ degraded")
+		return dDegradedStyle.Render("⚠ degraded")
 	case fleet.NodeStatusDraining:
-		return drainingStyle.Render("◐ draining")
+		return dDrainingStyle.Render("◐ draining")
 	case fleet.NodeStatusUnreachable:
-		return unreachableStyle.Render("✗ unreach.")
+		return dUnreachableStyle.Render("✗ unreach.")
 	default:
-		return cellStyle.Render("? " + string(status))
+		return dCellStyle.Render("? " + string(status))
 	}
 }
 

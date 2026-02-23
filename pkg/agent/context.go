@@ -230,11 +230,31 @@ func sanitizeHistoryForProvider(history []providers.Message) []providers.Message
 				continue
 			}
 			last := sanitized[len(sanitized)-1]
-			if last.Role != "assistant" || len(last.ToolCalls) == 0 {
+			// Allow tool messages when the preceding message is either:
+			// - an assistant message with tool_calls (first tool result in a group), or
+			// - another tool message (subsequent tool results in the same group).
+			if last.Role == "assistant" && len(last.ToolCalls) > 0 {
+				sanitized = append(sanitized, msg)
+			} else if last.Role == "tool" {
+				// We're in a sequence of tool results — verify the group started
+				// with a valid assistant message by scanning backwards.
+				valid := false
+				for i := len(sanitized) - 1; i >= 0; i-- {
+					if sanitized[i].Role != "tool" {
+						if sanitized[i].Role == "assistant" && len(sanitized[i].ToolCalls) > 0 {
+							valid = true
+						}
+						break
+					}
+				}
+				if valid {
+					sanitized = append(sanitized, msg)
+				} else {
+					logger.DebugCF("agent", "Dropping orphaned tool message (no preceding assistant with tool_calls)", map[string]any{})
+				}
+			} else {
 				logger.DebugCF("agent", "Dropping orphaned tool message", map[string]any{})
-				continue
 			}
-			sanitized = append(sanitized, msg)
 
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
@@ -259,7 +279,55 @@ func sanitizeHistoryForProvider(history []providers.Message) []providers.Message
 		}
 	}
 
-	return sanitized
+	// Second pass: ensure every assistant message with tool_calls has ALL its
+	// tool_call_ids answered by subsequent tool messages. If any are missing
+	// (e.g. history was truncated mid-group), drop the entire incomplete group.
+	final := make([]providers.Message, 0, len(sanitized))
+	i := 0
+	for i < len(sanitized) {
+		msg := sanitized[i]
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			// Collect the expected tool_call_ids
+			expectedIDs := make(map[string]bool, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				expectedIDs[tc.ID] = false
+			}
+			// Scan ahead to find the tool responses
+			j := i + 1
+			for j < len(sanitized) && sanitized[j].Role == "tool" {
+				if _, ok := expectedIDs[sanitized[j].ToolCallID]; ok {
+					expectedIDs[sanitized[j].ToolCallID] = true
+				}
+				j++
+			}
+			// Check all tool_call_ids were answered
+			allAnswered := true
+			for _, answered := range expectedIDs {
+				if !answered {
+					allAnswered = false
+					break
+				}
+			}
+			if allAnswered {
+				// Keep the assistant message and all its tool responses
+				for k := i; k < j; k++ {
+					final = append(final, sanitized[k])
+				}
+			} else {
+				logger.DebugCF("agent", "Dropping incomplete tool-call group (missing tool responses)", map[string]any{
+					"tool_call_count": len(msg.ToolCalls),
+					"dropped_from":   i,
+					"dropped_to":     j,
+				})
+			}
+			i = j
+		} else {
+			final = append(final, msg)
+			i++
+		}
+	}
+
+	return final
 }
 
 func (cb *ContextBuilder) AddToolResult(
