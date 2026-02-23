@@ -25,48 +25,40 @@ type ExecTool struct {
 }
 
 var defaultDenyPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`\brm\s+-[rf]{1,2}\b`),
-	regexp.MustCompile(`\bdel\s+/[fq]\b`),
-	regexp.MustCompile(`\brmdir\s+/s\b`),
-	regexp.MustCompile(`\b(format|mkfs|diskpart)\b\s`), // Match disk wiping commands (must be followed by space/args)
-	regexp.MustCompile(`\bdd\s+if=`),
-	regexp.MustCompile(`>\s*/dev/sd[a-z]\b`), // Block writes to disk devices (but allow /dev/null)
-	regexp.MustCompile(`\b(shutdown|reboot|poweroff)\b`),
-	regexp.MustCompile(`:\(\)\s*\{.*\};\s*:`),
-	regexp.MustCompile(`\$\([^)]+\)`),
-	regexp.MustCompile(`\$\{[^}]+\}`),
-	regexp.MustCompile("`[^`]+`"),
-	regexp.MustCompile(`\|\s*sh\b`),
-	regexp.MustCompile(`\|\s*bash\b`),
-	regexp.MustCompile(`;\s*rm\s+-[rf]`),
-	regexp.MustCompile(`&&\s*rm\s+-[rf]`),
-	regexp.MustCompile(`\|\|\s*rm\s+-[rf]`),
-	regexp.MustCompile(`>\s*/dev/null\s*>&?\s*\d?`),
-	regexp.MustCompile(`<<\s*EOF`),
-	regexp.MustCompile(`\$\(\s*cat\s+`),
-	regexp.MustCompile(`\$\(\s*curl\s+`),
-	regexp.MustCompile(`\$\(\s*wget\s+`),
-	regexp.MustCompile(`\$\(\s*which\s+`),
-	regexp.MustCompile(`\bsudo\b`),
-	regexp.MustCompile(`\bchmod\s+[0-7]{3,4}\b`),
-	regexp.MustCompile(`\bchown\b`),
-	regexp.MustCompile(`\bpkill\b`),
-	regexp.MustCompile(`\bkillall\b`),
-	regexp.MustCompile(`\bkill\s+-[9]\b`),
-	regexp.MustCompile(`\bcurl\b.*\|\s*(sh|bash)`),
-	regexp.MustCompile(`\bwget\b.*\|\s*(sh|bash)`),
-	regexp.MustCompile(`\bnpm\s+install\s+-g\b`),
-	regexp.MustCompile(`\bpip\s+install\s+--user\b`),
-	regexp.MustCompile(`\bapt\s+(install|remove|purge)\b`),
-	regexp.MustCompile(`\byum\s+(install|remove)\b`),
-	regexp.MustCompile(`\bdnf\s+(install|remove)\b`),
-	regexp.MustCompile(`\bdocker\s+run\b`),
-	regexp.MustCompile(`\bdocker\s+exec\b`),
-	regexp.MustCompile(`\bgit\s+push\b`),
-	regexp.MustCompile(`\bgit\s+force\b`),
-	regexp.MustCompile(`\bssh\b.*@`),
-	regexp.MustCompile(`\beval\b`),
-	regexp.MustCompile(`\bsource\s+.*\.sh\b`),
+	// ── Destructive file/directory deletion ──
+	regexp.MustCompile(`\brm\s+-[rf]{1,2}\s+/`),            // rm -rf / (root wipe)
+	regexp.MustCompile(`\brm\s+-[rf]{1,2}\s+\*`),           // rm -rf * (wildcard wipe)
+	regexp.MustCompile(`\brm\s+-[rf]{1,2}\s+~`),            // rm -rf ~ (home wipe)
+	regexp.MustCompile(`\bdel\s+/[fq]\s+/`),                // Windows: del /f /
+	regexp.MustCompile(`\brmdir\s+/s\b`),                   // Windows: rmdir /s
+
+	// ── Disk/partition destruction ──
+	regexp.MustCompile(`\b(mkfs|format)\b\s`),              // Format filesystems
+	regexp.MustCompile(`\bdiskpart\b`),                     // Windows disk partitioning
+	regexp.MustCompile(`\bdd\s+if=.*of=/dev/`),             // dd write to raw device
+	regexp.MustCompile(`>\s*/dev/sd[a-z]\b`),               // Redirect to raw disk device
+
+	// ── System shutdown/reboot ──
+	regexp.MustCompile(`\b(shutdown|poweroff)\b`),           // System power off (reboot allowed)
+
+	// ── Fork bomb ──
+	regexp.MustCompile(`:\(\)\s*\{.*\};\s*:`),              // Classic fork bomb pattern
+
+	// ── Pipe to shell from remote (code execution) ──
+	regexp.MustCompile(`\bcurl\b.*\|\s*(sh|bash)\b`),       // curl | bash
+	regexp.MustCompile(`\bwget\b.*\|\s*(sh|bash)\b`),       // wget | bash
+
+	// ── Dangerous container operations ──
+	regexp.MustCompile(`\bdocker\s+(rm|rmi)\s+-f\b`),       // Force-remove containers/images
+	regexp.MustCompile(`\bdocker\s+system\s+prune\b`),      // Wipe all unused docker resources
+	regexp.MustCompile(`\bdocker\s+volume\s+prune\b`),      // Wipe all unused volumes
+
+	// ── Dangerous git operations ──
+	regexp.MustCompile(`\bgit\s+push\s+.*--force\b`),       // Force push (rewrite history)
+	regexp.MustCompile(`\bgit\s+clean\s+-[a-z]*f`),         // git clean -f (delete untracked)
+
+	// ── Dangerous K8s operations ──
+	regexp.MustCompile(`\bkubectl\s+delete\s+(ns|namespace)\b`), // Delete entire namespace
 }
 
 func NewExecTool(workingDir string, restrict bool) *ExecTool {
