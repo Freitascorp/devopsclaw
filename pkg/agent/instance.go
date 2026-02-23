@@ -51,7 +51,10 @@ func NewAgentInstance(
 	toolsRegistry.Register(tools.NewReadFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewWriteFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewListDirTool(workspace, restrict))
-	toolsRegistry.Register(tools.NewExecToolWithConfig(workspace, restrict, cfg))
+	// Exec tool is not workspace-restricted — many commands (kubectl, docker,
+	// brew, system utils) legitimately reference paths outside the project.
+	// Safety is still enforced via deny-pattern blocklist + user confirmation.
+	toolsRegistry.Register(tools.NewExecToolWithConfig(workspace, false, cfg))
 	toolsRegistry.Register(tools.NewEditFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict))
 

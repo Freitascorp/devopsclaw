@@ -102,7 +102,7 @@ func (c *ChatRenderer) RenderSystemWarning(msg string) string {
 
 // RenderToolCall – wide gray left border, header with triangle-right prefix.
 func (c *ChatRenderer) RenderToolCall(name string, args map[string]any) string {
-	header := formatToolHdr(name, args)
+	header := FormatToolHdr(name, args)
 
 	var inner strings.Builder
 	inner.WriteString(ToolHdrText.Render(header))
@@ -119,9 +119,9 @@ func (c *ChatRenderer) RenderToolCall(name string, args map[string]any) string {
 
 // RenderToolOutput – gray or red border, truncated to 15 lines.
 func (c *ChatRenderer) RenderToolOutput(output string, isError bool) string {
-	text := truncateOutput(output, 15)
+	text := TruncateOutput(output, 15)
 
-	summary := fmtResultSummary(output, isError)
+	summary := FmtResultSummary(output, isError)
 	if summary != "" {
 		text += "\n" + MutedText.Render(summary)
 	}
@@ -142,36 +142,7 @@ func (c *ChatRenderer) RenderToolDenied(name, reason string) string {
 // with individual prompt-option rows for each choice.
 func (c *ChatRenderer) RenderConfirm(name, preview string) string {
 	w := MaxContentWidth(TerminalWidth())
-	if w > 90 {
-		w = 90
-	}
-	optW := w - 6 // account for outer border + padding
-
-	title := PromptTitleStyle.Render("Allow " + name + "?")
-	var previewLine string
-	if preview != "" {
-		previewLine = MutedText.Render(preview)
-	}
-
-	// Each option is a prompt-option row with tall left border
-	opt1 := PromptOptionSelectedStyle.Width(optW).Render(
-		lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary).Render("y") + "  " + NormalText.Render("Yes, allow this time"))
-	opt2 := PromptOptionStyle.Width(optW).Render(
-		lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary).Render("a") + "  " + MutedText.Render("Always allow in this session"))
-	opt3 := PromptOptionStyle.Width(optW).Render(
-		lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("n") + "  " + MutedText.Render("No, deny"))
-
-	var inner strings.Builder
-	inner.WriteString(title)
-	if previewLine != "" {
-		inner.WriteString("\n" + previewLine)
-	}
-	inner.WriteString("\n\n")
-	inner.WriteString(opt1 + "\n")
-	inner.WriteString(opt2 + "\n")
-	inner.WriteString(opt3)
-
-	return "\n" + ConfirmBlockStyle.Width(w).Render(inner.String()) + "\n"
+	return "\n" + RenderConfirmBox(name, preview, w, ConfirmOptYes) + "\n"
 }
 
 // RenderThinking – braille spinner "thinking…" in muted text.
@@ -187,7 +158,7 @@ func (c *ChatRenderer) RenderIterationBadge(iter, max int) string {
 
 // RenderUsage – compact token-usage summary line.
 func (c *ChatRenderer) RenderUsage(prompt, completion, total int) string {
-	return MutedText.Render(fmtUsage(prompt, completion, total))
+	return MutedText.Render(FmtUsage(prompt, completion, total))
 }
 
 // RenderError – red left border with "Error: " prefix.
@@ -209,7 +180,7 @@ func (c *ChatRenderer) RenderGoodbye() string {
 func (c *ChatRenderer) RenderFooter(model string, contextPct float64) string {
 	w := MaxContentWidth(TerminalWidth())
 	left := MutedText.Render(model)
-	right := renderCtxBar(contextPct)
+	right := RenderCtxBar(contextPct)
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 4
 	if gap < 1 {
 		gap = 1

@@ -105,6 +105,7 @@ type ChatApp struct {
 
 	// Confirm state
 	confirmActive  bool
+	confirmIdx     int // 0=yes, 1=always, 2=no — navigated with arrows
 	confirmName    string
 	confirmPreview string
 	confirmCb      func(ConfirmChoice)
@@ -211,7 +212,7 @@ func (m ChatApp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case UsageMsg:
 		usage := ChatMsg{
 			Role:    "system",
-			Content: fmtUsage(msg.Prompt, msg.Completion, msg.Total),
+			Content: FmtUsage(msg.Prompt, msg.Completion, msg.Total),
 			Time:    time.Now(),
 		}
 		m.messages = append(m.messages, usage)
@@ -224,6 +225,7 @@ func (m ChatApp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ConfirmRequestMsg:
 		m.confirmActive = true
+		m.confirmIdx = ConfirmOptYes // start on "Yes"
 		m.confirmName = msg.ToolName
 		m.confirmPreview = msg.Preview
 		m.confirmCb = msg.Respond
@@ -243,23 +245,44 @@ func (m ChatApp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m ChatApp) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// Confirm mode key handling
+	// Confirm mode key handling — arrow navigation + Enter to select
 	if m.confirmActive {
 		switch key {
-		case "y", "enter":
+		case "up", "k":
+			if m.confirmIdx > 0 {
+				m.confirmIdx--
+			}
+		case "down", "j":
+			if m.confirmIdx < confirmOptCount-1 {
+				m.confirmIdx++
+			}
+		case "enter":
+			m.confirmActive = false
+			if m.confirmCb != nil {
+				switch m.confirmIdx {
+				case ConfirmOptYes:
+					m.confirmCb(ConfirmYes)
+				case ConfirmOptAlways:
+					m.confirmCb(ConfirmAlwaysSession)
+				case ConfirmOptNo:
+					m.confirmCb(ConfirmNo)
+				}
+			}
+		// Quick-select shortcut keys
+		case "y":
 			m.confirmActive = false
 			if m.confirmCb != nil {
 				m.confirmCb(ConfirmYes)
-			}
-		case "n", "esc":
-			m.confirmActive = false
-			if m.confirmCb != nil {
-				m.confirmCb(ConfirmNo)
 			}
 		case "a":
 			m.confirmActive = false
 			if m.confirmCb != nil {
 				m.confirmCb(ConfirmAlwaysSession)
+			}
+		case "n", "esc":
+			m.confirmActive = false
+			if m.confirmCb != nil {
+				m.confirmCb(ConfirmNo)
 			}
 		}
 		return m, nil
@@ -426,7 +449,7 @@ func (m ChatApp) renderMessage(msg ChatMsg, w int) string {
 		return "\n" + SummaryBlockStyle.Width(w + 2).Render(body) + "\n"
 
 	case "tool":
-		header := formatToolHdr(msg.ToolName, msg.ToolArgs)
+		header := FormatToolHdr(msg.ToolName, msg.ToolArgs)
 		var inner strings.Builder
 		inner.WriteString(ToolHdrText.Render(header))
 		if msg.ToolName == "exec" {
@@ -437,10 +460,10 @@ func (m ChatApp) renderMessage(msg ChatMsg, w int) string {
 		}
 		if msg.Content != "" {
 			// Tool output
-			text := truncateOutput(msg.Content, 15)
+			text := TruncateOutput(msg.Content, 15)
 			inner.WriteString("\n" + PanelText.Render("───") + "\n")
 			inner.WriteString(NormalText.Width(w).Render(text))
-			summary := fmtResultSummary(msg.Content, msg.IsError)
+			summary := FmtResultSummary(msg.Content, msg.IsError)
 			if summary != "" {
 				inner.WriteString("\n" + MutedText.Render(summary))
 			}
@@ -469,36 +492,7 @@ func (m ChatApp) renderMessage(msg ChatMsg, w int) string {
 }
 
 func (m ChatApp) renderConfirmBlock(msg ChatMsg, w int) string {
-	promptW := w
-	if promptW > 90 {
-		promptW = 90
-	}
-	optW := promptW - 6
-
-	title := PromptTitleStyle.Render("Allow " + msg.ToolName + "?")
-	var previewLine string
-	if msg.Content != "" {
-		previewLine = MutedText.Render(msg.Content)
-	}
-
-	opt1 := PromptOptionSelectedStyle.Width(optW).Render(
-		lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary).Render("y") + "  " + NormalText.Render("Yes, allow this time"))
-	opt2 := PromptOptionStyle.Width(optW).Render(
-		lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary).Render("a") + "  " + MutedText.Render("Always allow in this session"))
-	opt3 := PromptOptionStyle.Width(optW).Render(
-		lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("n") + "  " + MutedText.Render("No, deny"))
-
-	var inner strings.Builder
-	inner.WriteString(title)
-	if previewLine != "" {
-		inner.WriteString("\n" + previewLine)
-	}
-	inner.WriteString("\n\n")
-	inner.WriteString(opt1 + "\n")
-	inner.WriteString(opt2 + "\n")
-	inner.WriteString(opt3)
-
-	return "\n" + ConfirmBlockStyle.Width(promptW).Render(inner.String())
+	return "\n" + RenderConfirmBox(msg.ToolName, msg.Content, w, ConfirmOptYes)
 }
 
 // ─── Thinking indicator ────────────────────────────────────────────────
@@ -525,38 +519,7 @@ func (m ChatApp) renderInput(contentW int) string {
 // ─── Confirm prompt (overlay) ──────────────────────────────────────────
 
 func (m ChatApp) renderConfirmPrompt(contentW int) string {
-	promptW := contentW
-	if promptW > 90 {
-		promptW = 90
-	}
-	optW := promptW - 6
-
-	title := PromptTitleStyle.Render("Allow " + m.confirmName + "?")
-	var previewLine string
-	if m.confirmPreview != "" {
-		previewLine = MutedText.Render(m.confirmPreview)
-	}
-
-	// Each option is a prompt-option row with tall left border;
-	// the first (default) option is highlighted.
-	opt1 := PromptOptionSelectedStyle.Width(optW).Render(
-		lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary).Render("y") + "  " + NormalText.Render("Yes, allow this time"))
-	opt2 := PromptOptionStyle.Width(optW).Render(
-		lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary).Render("a") + "  " + MutedText.Render("Always allow in this session"))
-	opt3 := PromptOptionStyle.Width(optW).Render(
-		lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("n") + "  " + MutedText.Render("No, deny"))
-
-	var inner strings.Builder
-	inner.WriteString(title)
-	if previewLine != "" {
-		inner.WriteString("\n" + previewLine)
-	}
-	inner.WriteString("\n\n")
-	inner.WriteString(opt1 + "\n")
-	inner.WriteString(opt2 + "\n")
-	inner.WriteString(opt3)
-
-	return ConfirmBlockStyle.Width(promptW).Render(inner.String())
+	return RenderConfirmBox(m.confirmName, m.confirmPreview, contentW, m.confirmIdx)
 }
 
 // ─── Footer ────────────────────────────────────────────────────────────
@@ -583,7 +546,7 @@ func (m ChatApp) renderFooter() string {
 	}
 	permRendered := permStyle.Render(permLabel)
 
-	contextBar := renderCtxBar(m.contextPct)
+	contextBar := RenderCtxBar(m.contextPct)
 
 	left := fmt.Sprintf(" %s %s %s", modelLabel, sep, permRendered)
 	right := fmt.Sprintf("%s ", contextBar)
@@ -601,134 +564,12 @@ func (m ChatApp) renderFooter() string {
 // ─── Context bar ───────────────────────────────────────────────────────
 // Mirrors claudechic ContextBar indicator
 
-func renderCtxBar(pct float64) string {
-	if pct < 0 {
-		pct = 0
-	}
-	if pct > 1 {
-		pct = 1
-	}
-	barWidth := 10
-	filled := int(pct * float64(barWidth))
 
-	var fillColor, emptyColor lipgloss.Color
-	switch {
-	case pct < 0.5:
-		fillColor = lipgloss.Color("#666666")
-	case pct < 0.8:
-		fillColor = ColorWarn
-	default:
-		fillColor = ColorError
-	}
-	emptyColor = lipgloss.Color("#333333")
-
-	var bar strings.Builder
-	pctStr := fmt.Sprintf("%2.0f%%", pct*100)
-	start := (barWidth - len(pctStr)) / 2
-
-	for i := 0; i < barWidth; i++ {
-		bg := emptyColor
-		if i < filled {
-			bg = fillColor
-		}
-		fg := ColorText
-		if start <= i && i < start+len(pctStr) {
-			ch := string(pctStr[i-start])
-			bar.WriteString(lipgloss.NewStyle().
-				Foreground(fg).Background(bg).Render(ch))
-		} else {
-			bar.WriteString(lipgloss.NewStyle().
-				Background(bg).Render(" "))
-		}
-	}
-	return bar.String()
-}
 
 // ─── Formatting helpers ────────────────────────────────────────────────
 // Ported from claudechic/formatting.py
 
-func formatToolHdr(name string, args map[string]any) string {
-	switch name {
-	case "exec":
-		if d, ok := args["description"].(string); ok && d != "" {
-			return "▸ " + name + " " + truncStr(d, 60)
-		}
-		if cmd, ok := args["command"].(string); ok {
-			return "▸ " + name + " " + truncStr(cmd, 60)
-		}
-	case "read_file", "write_file", "edit_file", "append_file", "list_dir":
-		if p, ok := args["path"].(string); ok {
-			return "▸ " + name + " " + p
-		}
-	case "web_search":
-		if q, ok := args["query"].(string); ok {
-			return "▸ " + name + " " + truncStr(q, 60)
-		}
-	case "web_fetch", "browser":
-		if u, ok := args["url"].(string); ok {
-			return "▸ " + name + " " + truncStr(u, 60)
-		}
-	case "message":
-		if ct, ok := args["content"].(string); ok {
-			return "▸ " + name + " " + truncStr(ct, 40)
-		}
-	case "spawn":
-		if d, ok := args["description"].(string); ok && d != "" {
-			return "▸ " + name + " " + truncStr(d, 50)
-		}
-	}
-	return "▸ " + name
-}
 
-func fmtResultSummary(content string, isError bool) string {
-	if isError {
-		return "(error)"
-	}
-	stripped := strings.TrimSpace(content)
-	if stripped == "" {
-		return "(no output)"
-	}
-	lines := strings.Split(stripped, "\n")
-	return fmt.Sprintf("(%d lines)", len(lines))
-}
-
-func truncateOutput(output string, maxLines int) string {
-	lines := strings.Split(output, "\n")
-	if len(lines) <= maxLines {
-		return output
-	}
-	total := len(lines)
-	text := strings.Join(lines[:maxLines], "\n")
-	text += "\n" + MutedText.Render(fmt.Sprintf("… %d more lines", total-maxLines))
-	return text
-}
-
-func truncStr(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	if max <= 3 {
-		return s[:max]
-	}
-	return s[:max-3] + "..."
-}
-
-func fmtTokCount(n int) string {
-	if n >= 1_000_000 {
-		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
-	}
-	if n >= 1_000 {
-		return fmt.Sprintf("%.1fk", float64(n)/1_000)
-	}
-	return fmt.Sprintf("%d", n)
-}
-
-func fmtUsage(prompt, completion, total int) string {
-	return fmt.Sprintf(
-		"  %s prompt · %s completion · %s total",
-		fmtTokCount(prompt), fmtTokCount(completion), fmtTokCount(total),
-	)
-}
 
 // ─── Public API for external callers ───────────────────────────────────
 

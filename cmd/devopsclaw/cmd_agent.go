@@ -129,7 +129,7 @@ func agentCmd() {
 		}
 	})
 
-	// Set up human-in-the-loop confirmation with styled prompt
+	// Set up human-in-the-loop confirmation with interactive arrow-key prompt
 	agentLoop.SetConfirmCallback(func(toolName string, args map[string]any) agent.ConfirmResult {
 		preview := ""
 		switch toolName {
@@ -148,15 +148,11 @@ func agentCmd() {
 		}
 
 		clearSpinnerLine()
-		fmt.Print(chat.RenderConfirm(toolName, preview))
-
-		reader := bufio.NewReader(os.Stdin)
-		line, _ := reader.ReadString('\n')
-		answer := strings.TrimSpace(strings.ToLower(line))
-		switch answer {
-		case "", "y", "yes":
+		choice := tui.RunConfirmPrompt(toolName, preview)
+		switch choice {
+		case tui.ConfirmOptYes:
 			return agent.ConfirmAllow
-		case "a", "always":
+		case tui.ConfirmOptAlways:
 			return agent.ConfirmAllowSession
 		default:
 			return agent.ConfirmDeny

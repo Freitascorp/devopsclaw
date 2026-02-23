@@ -99,22 +99,19 @@ var ConfirmBlockStyle = lipgloss.NewStyle().
 	PaddingLeft(1).PaddingRight(2).PaddingTop(1).PaddingBottom(1).
 	Background(ColorSurface)
 
-// PromptOptionStyle – .prompt-option { border-left: tall $panel; color: $text-muted; padding: 0 0 0 1; }
+// PromptOptionStyle – unselected option: subtle left border, dimmed text.
 var PromptOptionStyle = lipgloss.NewStyle().
-	Border(TallBorder).
-	BorderLeft(true).BorderTop(false).BorderBottom(false).BorderRight(false).
-	BorderForeground(ColorPanel).
 	PaddingLeft(1).
 	Foreground(ColorMuted)
 
-// PromptOptionSelectedStyle – .prompt-option.selected { border-left: tall $primary; color: $text; background: $surface-lighten-1; }
+// PromptOptionSelectedStyle – selected option: bright left border, highlighted bg, bright text.
 var PromptOptionSelectedStyle = lipgloss.NewStyle().
 	Border(TallBorder).
 	BorderLeft(true).BorderTop(false).BorderBottom(false).BorderRight(false).
 	BorderForeground(ColorPrimary).
 	PaddingLeft(1).
 	Foreground(ColorText).
-	Background(lipgloss.Color("#222222")) // $surface-lighten-1
+	Background(lipgloss.Color("#1a1a2e")) // subtle highlight bg
 
 // PromptTitleStyle – .prompt-title { color: $text; padding: 0 0 1 0; }
 var PromptTitleStyle = lipgloss.NewStyle().

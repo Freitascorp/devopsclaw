@@ -103,6 +103,17 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 
 	// Set up RBAC tool guard
 	enforcer := rbac.NewEnforcer(nil) // nil audit logger — audit is handled separately
+
+	// Register built-in system users so local CLI and cron jobs
+	// are never blocked by RBAC when it is enabled.
+	for _, sysID := range []string{"cli", "cron", "direct", "local"} {
+		enforcer.RegisterUser(&rbac.User{
+			ID:          rbac.UserID(sysID),
+			DisplayName: sysID + " (built-in)",
+			Roles:       []rbac.RoleName{"operator"},
+		})
+	}
+
 	toolGuard := rbac.NewToolGuard(enforcer, cfg.RBAC.Enabled)
 
 	return &AgentLoop{
@@ -331,9 +342,19 @@ func (al *AgentLoop) ProcessDirectWithChannel(
 	ctx context.Context,
 	content, sessionKey, channel, chatID string,
 ) (string, error) {
+	// Derive sender from channel — CLI gets "cli", cron gets "cron",
+	// everything else falls back to "local".
+	sender := "local"
+	switch channel {
+	case "cli":
+		sender = "cli"
+	case "cron":
+		sender = "cron"
+	}
+
 	msg := bus.InboundMessage{
 		Channel:    channel,
-		SenderID:   "cron",
+		SenderID:   sender,
 		ChatID:     chatID,
 		Content:    content,
 		SessionKey: sessionKey,
