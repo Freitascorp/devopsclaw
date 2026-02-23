@@ -178,3 +178,7 @@ redis-cli CONFIG SET maxmemory-policy allkeys-lru
 - Use `maxmemory-policy allkeys-lru` for caching use cases.
 - Use `redis-cli --stat` for real-time stats overview.
 - Use pipelines for bulk operations: `cat commands.txt | redis-cli --pipe`.
+
+## Bundled Scripts
+
+- Health check: `{baseDir}/scripts/redis-health.sh` (memory, connections, replication, persistence, slow log)

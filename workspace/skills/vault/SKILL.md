@@ -212,3 +212,7 @@ vault status
 - Use `vault kv patch` instead of `vault kv put` to update individual fields without overwriting.
 - Set `VAULT_ADDR` and `VAULT_TOKEN` environment variables to avoid repeating them.
 - Use `vault lease revoke -prefix database/creds/` to revoke all dynamic creds in an emergency.
+
+## Bundled Scripts
+
+- Health check: `{baseDir}/scripts/vault-health.sh` (seal status, auth methods, secret engines, audit devices)

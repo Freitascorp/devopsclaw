@@ -46,3 +46,7 @@ Most commands support `--json` for structured output.  You can use `--jq` to fil
 ```bash
 gh issue list --repo owner/repo --json number,title --jq '.[] | "\(.number): \(.title)"'
 ```
+
+## Bundled Scripts
+
+- Wait for CI: `{baseDir}/scripts/wait-for-ci.sh -r owner/repo -p 55` (polls until all checks pass or fail)

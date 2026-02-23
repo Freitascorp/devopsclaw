@@ -218,3 +218,8 @@ terraform providers lock -platform=linux_amd64 -platform=darwin_arm64
 - Use `terraform force-unlock LOCK_ID` if state gets stuck (rare).
 - Use `TF_VAR_name=value` environment variables instead of `-var` in CI.
 - Use `count` or `for_each` for multiple similar resources.
+
+## Bundled Scripts
+
+- Plan summary: `{baseDir}/scripts/plan-summary.sh` (runs plan and produces a concise change summary)
+- Drift check: `{baseDir}/scripts/drift-check.sh` (safe read-only check for state drift)

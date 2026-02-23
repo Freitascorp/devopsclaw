@@ -164,3 +164,7 @@ groups:
 - Use `--data-urlencode` with curl for complex PromQL (avoids shell escaping issues).
 - Use `{__name__=~"node_.*"}` to discover metrics for a specific exporter.
 - Use `count(up)` to check how many targets exist.
+
+## Bundled Scripts
+
+- Query Prometheus: `{baseDir}/scripts/query-prom.sh -q 'up'` (supports instant and range queries with text/json/csv output)
