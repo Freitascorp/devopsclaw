@@ -1,4 +1,3 @@
-```skill
 ---
 name: grafana
 description: "Manage Grafana dashboards, data sources, alerts, and users via the Grafana HTTP API. Create, export, and import dashboards programmatically."
@@ -147,4 +146,3 @@ curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
 - Create API keys at `$GRAFANA_URL/org/apikeys` or use service accounts.
 - Use annotations to mark deployments on dashboards — shows as vertical lines on graphs.
 - Export dashboards to JSON and version-control them in git.
-```

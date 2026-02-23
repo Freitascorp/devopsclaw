@@ -1,4 +1,3 @@
-```skill
 ---
 name: terraform
 description: "Manage infrastructure as code with Terraform. Plan, apply, destroy, import resources, manage state, workspaces, and modules."
@@ -219,4 +218,3 @@ terraform providers lock -platform=linux_amd64 -platform=darwin_arm64
 - Use `terraform force-unlock LOCK_ID` if state gets stuck (rare).
 - Use `TF_VAR_name=value` environment variables instead of `-var` in CI.
 - Use `count` or `for_each` for multiple similar resources.
-```

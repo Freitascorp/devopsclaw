@@ -1,4 +1,3 @@
-```skill
 ---
 name: pulumi
 description: "Manage infrastructure as code with Pulumi using real programming languages (TypeScript, Python, Go, C#). Create, update, destroy stacks."
@@ -144,4 +143,3 @@ pulumi stack graph graph.dot
 - Use `pulumi convert --from terraform` to convert HCL to Pulumi.
 - Use stack references to share outputs between stacks.
 - Use `ComponentResource` to create reusable abstractions.
-```

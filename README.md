@@ -1,6 +1,6 @@
 <div align="center">
 
-# DevOpsClaw
+<img src="assets/logo.png" alt="DevOpsClaw" width="600">
 
 **Production-grade AI DevOps platform. Single binary. Fleet-scale.**
 

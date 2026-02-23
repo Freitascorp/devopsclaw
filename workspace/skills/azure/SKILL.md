@@ -1,4 +1,3 @@
-```skill
 ---
 name: azure
 description: "Manage Azure infrastructure using the `az` CLI. Covers VMs, AKS, App Service, Storage, Key Vault, Azure SQL, Resource Groups, and more."
@@ -222,4 +221,3 @@ az consumption usage list --start-date $(date +%Y-%m-01) --end-date $(date +%Y-%
 - Use `az find "keyword"` to discover commands.
 - Default output is JSON; `--output table` for readability, `--output tsv` for scripts.
 - Tag resources: `--tags env=prod team=platform` on create commands.
-```

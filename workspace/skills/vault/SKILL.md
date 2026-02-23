@@ -1,4 +1,3 @@
-```skill
 ---
 name: vault
 description: "Manage secrets, encryption, and PKI with HashiCorp Vault. Secret engines, auth methods, policies, dynamic credentials, and transit encryption."
@@ -213,4 +212,3 @@ vault status
 - Use `vault kv patch` instead of `vault kv put` to update individual fields without overwriting.
 - Set `VAULT_ADDR` and `VAULT_TOKEN` environment variables to avoid repeating them.
 - Use `vault lease revoke -prefix database/creds/` to revoke all dynamic creds in an emergency.
-```

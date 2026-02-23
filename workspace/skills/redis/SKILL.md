@@ -1,4 +1,3 @@
-```skill
 ---
 name: redis
 description: "Manage Redis instances using the `redis-cli`. Keys, data structures, persistence, replication, Sentinel, memory analysis, and troubleshooting."
@@ -179,4 +178,3 @@ redis-cli CONFIG SET maxmemory-policy allkeys-lru
 - Use `maxmemory-policy allkeys-lru` for caching use cases.
 - Use `redis-cli --stat` for real-time stats overview.
 - Use pipelines for bulk operations: `cat commands.txt | redis-cli --pipe`.
-```

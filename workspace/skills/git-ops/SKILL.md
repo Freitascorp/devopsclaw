@@ -1,4 +1,3 @@
-```skill
 ---
 name: git-ops
 description: "Advanced Git operations for DevOps workflows. Branching strategies, rebasing, cherry-picking, bisect, submodules, hooks, and repository maintenance."
@@ -238,4 +237,3 @@ git config --global alias.last "log -1 HEAD --stat"
 - Use `git shortlog -sn` to see commit counts by author.
 - Use `git clean -fd` to remove untracked files and directories.
 - Use `--no-pager` or `| cat` to avoid pager in scripts.
-```

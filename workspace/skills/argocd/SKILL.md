@@ -1,4 +1,3 @@
-```skill
 ---
 name: argocd
 description: "Manage GitOps continuous delivery with Argo CD. Applications, sync, rollbacks, projects, repositories, and multi-cluster deployments."
@@ -242,4 +241,3 @@ argocd app get myapp --hard-refresh
 - Use `argocd app diff` before `argocd app sync` to preview changes.
 - Use Argo CD Notifications for Slack/email alerts on sync status.
 - Use `syncOptions: [ServerSideApply=true]` for large CRDs.
-```

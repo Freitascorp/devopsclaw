@@ -1,4 +1,3 @@
-```skill
 ---
 name: trivy
 description: "Scan containers, filesystems, and IaC for vulnerabilities and misconfigurations with Trivy. CVE scanning, SBOM generation, and CI/CD integration."
@@ -144,4 +143,3 @@ trivy image --download-db-only
 - Run `trivy image --download-db-only` as a CI cache step to speed up scans.
 - Use `--format sarif` for GitHub Code Scanning integration.
 - Scan both images AND filesystem — image scan catches OS packages, fs scan catches app dependencies.
-```

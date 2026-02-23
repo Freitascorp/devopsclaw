@@ -1,4 +1,3 @@
-```skill
 ---
 name: github-actions
 description: "Manage GitHub Actions CI/CD workflows using the `gh` CLI. List, view, trigger, and debug workflow runs, manage secrets, and view job logs."
@@ -174,4 +173,3 @@ on:
 - Use `gh act` (nektos/act) to test workflows locally.
 - Use `gh api` for advanced operations not covered by `gh run`/`gh workflow`.
 - Set `GH_REPO=owner/repo` to avoid repeating `--repo`.
-```

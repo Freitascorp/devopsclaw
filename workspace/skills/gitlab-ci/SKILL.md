@@ -1,4 +1,3 @@
-```skill
 ---
 name: gitlab-ci
 description: "Manage GitLab CI/CD pipelines using the `glab` CLI. Pipelines, jobs, merge requests, environments, and deployment management."
@@ -153,4 +152,3 @@ glab api projects/:id/variables --method POST \
 - Use `--json` for machine-readable output.
 - Use `glab ci lint` to validate `.gitlab-ci.yml` syntax.
 - Use `include:` in `.gitlab-ci.yml` to share pipeline templates across repos.
-```

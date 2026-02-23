@@ -1,4 +1,3 @@
-```skill
 ---
 name: aws
 description: "Manage AWS infrastructure using the `aws` CLI. Covers EC2, S3, IAM, Lambda, ECS, RDS, CloudFormation, Route53, CloudWatch, and more."
@@ -225,4 +224,3 @@ aws ce get-cost-and-usage \
 - Use `aws configure list` to debug which credentials are active.
 - Use `--no-paginate` or `--max-items` to control output size.
 - For large outputs, pipe through `| head -50` to avoid flooding the terminal.
-```

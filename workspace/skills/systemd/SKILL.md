@@ -1,4 +1,3 @@
-```skill
 ---
 name: systemd
 description: "Manage Linux services, timers, and system state with systemd. Create services, debug failures, manage boot targets, and journal logs."
@@ -249,4 +248,3 @@ systemctl list-dependencies myapp
 - Use `WantedBy=multi-user.target` for most server services.
 - Use `Restart=on-failure` instead of `always` if the service shouldn't restart on clean exit.
 - Use `ProtectSystem=strict` + `ReadWritePaths=` for security hardening.
-```

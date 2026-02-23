@@ -1,4 +1,3 @@
-```skill
 ---
 name: cert-manager
 description: "Manage TLS certificates in Kubernetes with cert-manager. Issuers, certificates, ACME/Let's Encrypt, and troubleshooting certificate issues."
@@ -207,4 +206,3 @@ cmctl renew app-tls -n my-app
 - Use `cert-manager.io/cluster-issuer` annotation on Ingress for automatic certificate creation.
 - For DNS01 challenges (wildcards), configure a DNS provider (Route53, CloudDNS, Cloudflare).
 - Install `cmctl` for cert-manager-specific CLI operations.
-```

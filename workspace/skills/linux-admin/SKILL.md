@@ -1,4 +1,3 @@
-```skill
 ---
 name: linux-admin
 description: "Essential Linux system administration. Disk, memory, CPU, networking, users, processes, package management, and troubleshooting."
@@ -354,4 +353,3 @@ last -5
 - Use `lsof -i :PORT` to find what's using a port.
 - Use `strace -p PID` to trace system calls (debugging).
 - Use `nohup command &` to run processes that survive logout.
-```

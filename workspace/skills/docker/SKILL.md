@@ -1,4 +1,3 @@
-```skill
 ---
 name: docker
 description: "Build, run, and manage containers with Docker. Images, containers, volumes, networks, Compose, multi-stage builds, and troubleshooting."
@@ -275,4 +274,3 @@ docker inspect --format='{{.State.Health.Status}}' my-app
 - Use `docker compose watch` for development with live reload.
 - Pin image tags in production — never use `:latest` in deployments.
 - Use `--no-cache` when debugging build issues: `docker build --no-cache .`.
-```

@@ -1,4 +1,3 @@
-```skill
 ---
 name: datadog
 description: "Monitor infrastructure and applications with Datadog. Use the `datadog-ci` CLI and Datadog API for metrics, logs, monitors, dashboards, and APM."
@@ -164,4 +163,3 @@ datadog-ci tag --level pipeline --tags "deploy.version:v2.1.0"
 - Use Datadog Events to mark deployments — they appear as overlays on dashboard graphs.
 - DD_SITE varies by region: `datadoghq.com` (US1), `datadoghq.eu` (EU), `us3.datadoghq.com` (US3), etc.
 - Use `dogstatsd` (UDP) for high-volume custom metrics from applications.
-```

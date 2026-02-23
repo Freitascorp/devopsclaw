@@ -1,4 +1,3 @@
-```skill
 ---
 name: postgres
 description: "Manage PostgreSQL databases. Queries, backups, replication, performance tuning, user management, and troubleshooting via psql and pg_dump."
@@ -206,4 +205,3 @@ ORDER BY n_dead_tup DESC LIMIT 10;"
 - Use `pg_dump -Fc` (custom format) — it supports parallel restore with `-j`.
 - Monitor `n_dead_tup` — high values mean autovacuum may need tuning.
 - Use connection pooling (PgBouncer) in production.
-```

@@ -1,4 +1,3 @@
-```skill
 ---
 name: nginx
 description: "Configure, manage, and troubleshoot Nginx as a reverse proxy, load balancer, and web server. Config syntax, SSL/TLS, rate limiting, and debugging."
@@ -212,4 +211,3 @@ sudo nginx -s reload
 - Use `proxy_next_upstream` for automatic failover to healthy backends.
 - Use `include` to keep configs modular: `include /etc/nginx/conf.d/*.conf;`.
 - Use `$request_id` for request tracing across proxy hops.
-```

@@ -1,4 +1,3 @@
-```skill
 ---
 name: ansible
 description: "Automate configuration management, application deployment, and orchestration with Ansible. Playbooks, inventory, roles, ad-hoc commands, and Ansible Vault."
@@ -224,4 +223,3 @@ ansible-playbook deploy.yaml --syntax-check
 - Use `when:` conditionals to skip tasks: `when: ansible_os_family == "Debian"`.
 - Use `register:` to capture command output for later tasks.
 - Use `block:` / `rescue:` / `always:` for error handling.
-```

@@ -1,4 +1,3 @@
-```skill
 ---
 name: helm
 description: "Manage Kubernetes applications with Helm charts. Install, upgrade, rollback releases, manage repositories, and create custom charts."
@@ -159,4 +158,3 @@ helm install argocd argo/argo-cd -n argocd --create-namespace
 - Use `helm diff` plugin to see changes before upgrading: `helm diff upgrade my-release bitnami/nginx -f values.yaml`.
 - Pin chart versions in CI: `helm install --version 15.3.1`.
 - Use `helm secrets` plugin for encrypted values files.
-```

@@ -1,4 +1,3 @@
-```skill
 ---
 name: flux
 description: "Manage GitOps continuous delivery with Flux CD. Sources, kustomizations, Helm releases, image automation, and multi-tenancy."
@@ -264,4 +263,3 @@ spec:
 - Use SOPS or Sealed Secrets for managing encrypted secrets in Git.
 - Use `dependsOn` in Kustomizations to control deployment order.
 - Use `flux tree kustomization myapp` to see the dependency tree.
-```

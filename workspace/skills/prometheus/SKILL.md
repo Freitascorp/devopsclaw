@@ -1,4 +1,3 @@
-```skill
 ---
 name: prometheus
 description: "Query and manage Prometheus metrics. PromQL queries, alerting rules, targets, recording rules, and troubleshooting via the Prometheus HTTP API."
@@ -165,4 +164,3 @@ groups:
 - Use `--data-urlencode` with curl for complex PromQL (avoids shell escaping issues).
 - Use `{__name__=~"node_.*"}` to discover metrics for a specific exporter.
 - Use `count(up)` to check how many targets exist.
-```

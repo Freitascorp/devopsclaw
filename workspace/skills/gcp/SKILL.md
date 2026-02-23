@@ -1,4 +1,3 @@
-```skill
 ---
 name: gcp
 description: "Manage Google Cloud infrastructure using the `gcloud` CLI. Covers Compute Engine, GKE, Cloud Run, Cloud Storage, IAM, Cloud SQL, and more."
@@ -245,4 +244,3 @@ bq query --use_legacy_sql=false '
 - Use `gcloud config configurations` to manage multiple projects/accounts.
 - Use `--quiet` to suppress prompts in scripts.
 - Use `gcloud components update` to keep the SDK current.
-```

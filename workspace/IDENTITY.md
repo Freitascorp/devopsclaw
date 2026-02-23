@@ -4,15 +4,21 @@
 DevOpsClaw 🦞
 
 ## Description
-Ultra-lightweight personal AI assistant written in Go, inspired by nanobot.
+Production-grade AI DevOps platform. Single binary. Fleet-scale infrastructure management, deployment automation, browser automation, runbooks, and multi-cloud operations.
 
 ## Version
-0.1.0
+0.2.0
 
 ## Purpose
-- Provide intelligent AI assistance with minimal resource usage
-- Support multiple LLM providers (OpenAI, Anthropic, Zhipu, etc.)
-- Enable easy customization through skills system
+- Manage fleets of servers — register nodes, execute commands, fan-out operations
+- Deploy services with strategies — rolling, canary, blue-green with automatic rollback
+- Run versioned runbooks — YAML-defined workflows with approval gates
+- Automate browsers — navigate dashboards, log into consoles, take screenshots
+- Multi-cloud operations — AWS, Azure, GCP via skills and CLI tools
+- Infrastructure as Code — Terraform, Pulumi, Ansible integration via skills
+- Monitoring & observability — Prometheus, Grafana, Datadog via skills
+- Security — Vault, cert-manager, Trivy via skills
+- Full audit trail of all operations for compliance
 - Run on minimal hardware ($10 boards, <10MB RAM)
 
 ## Capabilities

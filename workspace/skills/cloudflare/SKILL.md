@@ -1,4 +1,3 @@
-```skill
 ---
 name: cloudflare
 description: "Manage Cloudflare DNS, WAF, caching, tunnels, and Workers using the `flarectl` CLI or Cloudflare API. DNS records, page rules, and Zero Trust tunnels."
@@ -154,4 +153,3 @@ curl -s -H "Authorization: Bearer $CF_API_TOKEN" \
 - Use `proxied: false` for records that need direct access (MX, SSH).
 - Cloudflare Tunnels replace the need for public IPs and VPNs — perfect for NAT'd servers.
 - Use `CF_ZONE_ID` from the Cloudflare dashboard Overview page (right sidebar).
-```

@@ -1,4 +1,3 @@
-```skill
 ---
 name: kubernetes
 description: "Manage Kubernetes clusters with kubectl. Pods, deployments, services, ingress, configmaps, secrets, RBAC, debugging, and scaling."
@@ -297,4 +296,3 @@ spec:
 - Use `kubectx` and `kubens` for fast context/namespace switching.
 - Always set resource requests and limits in production.
 - Use `--dry-run=client -o yaml` to generate YAML: `kubectl create deploy web --image=nginx --dry-run=client -o yaml`.
-```

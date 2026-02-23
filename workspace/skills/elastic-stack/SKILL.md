@@ -1,4 +1,3 @@
-```skill
 ---
 name: elastic-stack
 description: "Manage Elasticsearch, Kibana, and log pipelines. Index management, search queries, ILM policies, and Kibana dashboards via REST API."
@@ -197,4 +196,3 @@ curl -s -X POST "$ES_URL/_snapshot/my-backup/snapshot-20250101/_restore"
 - Use index templates so new indices get correct mappings and ILM policies automatically.
 - For large clusters, use `_cat/shards?v&s=store:desc` to find hot shards.
 - Use `_explain` API to debug why a document doesn't match a query.
-```

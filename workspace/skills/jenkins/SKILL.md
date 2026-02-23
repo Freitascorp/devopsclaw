@@ -1,4 +1,3 @@
-```skill
 ---
 name: jenkins
 description: "Manage Jenkins CI/CD server using the `jenkins-cli` or REST API via curl. Jobs, builds, pipelines, and administration."
@@ -138,4 +137,3 @@ curl -s -X POST -u "$JENKINS_USER:$JENKINS_TOKEN" "$JENKINS_URL/quietDown"
 - Use `?tree=` parameter to limit API response fields (faster).
 - Use Blue Ocean UI for better pipeline visualization: `$JENKINS_URL/blue/`.
 - Use `jenkins-cli.jar` for more operations: `java -jar jenkins-cli.jar -s $JENKINS_URL -auth $JENKINS_USER:$JENKINS_TOKEN help`.
-```

@@ -1,4 +1,3 @@
-```skill
 ---
 name: packer
 description: "Build machine images with HashiCorp Packer. Create AMIs, Azure images, GCP images, Docker images, and Vagrant boxes from a single template."
@@ -204,4 +203,3 @@ build {
 - Use `PACKER_LOG=1` for verbose output.
 - Use `manifest` post-processor to capture output AMI IDs for Terraform.
 - Build images in CI/CD on a schedule (weekly) to keep base images patched.
-```
