@@ -75,6 +75,11 @@ func (p *Provider) Chat(
 
 	model = normalizeModel(model, p.apiBase)
 
+	// Codex models use the Responses API, not chat/completions.
+	if isCodexModel(model) {
+		return p.chatResponses(ctx, messages, tools, model, options)
+	}
+
 	requestBody := map[string]any{
 		"model":    model,
 		"messages": messages,
@@ -228,6 +233,235 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 	}, nil
 }
 
+// ─── Responses API (for codex models) ──────────────────────────────────
+
+func isCodexModel(model string) bool {
+	return strings.Contains(strings.ToLower(model), "codex")
+}
+
+// chatResponses calls the OpenAI Responses API (/v1/responses) which codex
+// models require instead of /v1/chat/completions.
+func (p *Provider) chatResponses(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (*LLMResponse, error) {
+	// Build input items and extract system instructions.
+	var inputItems []map[string]any
+	var instructions string
+
+	for _, msg := range messages {
+		switch msg.Role {
+		case "system":
+			instructions = msg.Content
+		case "user":
+			if msg.ToolCallID != "" {
+				inputItems = append(inputItems, map[string]any{
+					"type":    "function_call_output",
+					"call_id": msg.ToolCallID,
+					"output":  msg.Content,
+				})
+			} else {
+				inputItems = append(inputItems, map[string]any{
+					"type": "message",
+					"role": "user",
+					"content": []map[string]any{
+						{"type": "input_text", "text": msg.Content},
+					},
+				})
+			}
+		case "assistant":
+			if len(msg.ToolCalls) > 0 {
+				if msg.Content != "" {
+					inputItems = append(inputItems, map[string]any{
+						"type": "message",
+						"role": "assistant",
+						"content": []map[string]any{
+							{"type": "output_text", "text": msg.Content},
+						},
+					})
+				}
+				for _, tc := range msg.ToolCalls {
+					name := tc.Name
+					if name == "" && tc.Function != nil {
+						name = tc.Function.Name
+					}
+					args := "{}"
+					if len(tc.Arguments) > 0 {
+						if b, err := json.Marshal(tc.Arguments); err == nil {
+							args = string(b)
+						}
+					} else if tc.Function != nil && tc.Function.Arguments != "" {
+						args = tc.Function.Arguments
+					}
+					inputItems = append(inputItems, map[string]any{
+						"type":      "function_call",
+						"call_id":   tc.ID,
+						"name":      name,
+						"arguments": args,
+					})
+				}
+			} else {
+				inputItems = append(inputItems, map[string]any{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": msg.Content},
+					},
+				})
+			}
+		case "tool":
+			inputItems = append(inputItems, map[string]any{
+				"type":    "function_call_output",
+				"call_id": msg.ToolCallID,
+				"output":  msg.Content,
+			})
+		}
+	}
+
+	requestBody := map[string]any{
+		"model": model,
+		"input": inputItems,
+		"store": false,
+	}
+
+	if instructions != "" {
+		requestBody["instructions"] = instructions
+	}
+
+	// Translate tools.
+	if len(tools) > 0 {
+		var responsesTools []map[string]any
+		for _, t := range tools {
+			if t.Type != "function" {
+				continue
+			}
+			ft := map[string]any{
+				"type":       "function",
+				"name":       t.Function.Name,
+				"parameters": t.Function.Parameters,
+				"strict":     false,
+			}
+			if t.Function.Description != "" {
+				ft["description"] = t.Function.Description
+			}
+			responsesTools = append(responsesTools, ft)
+		}
+		requestBody["tools"] = responsesTools
+	}
+
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal responses request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", p.apiBase+"/responses", bytes.NewReader(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s", resp.StatusCode, string(body))
+	}
+
+	return parseResponsesAPIResponse(body)
+}
+
+func parseResponsesAPIResponse(body []byte) (*LLMResponse, error) {
+	var apiResp struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Output []struct {
+			Type      string `json:"type"`
+			Content   []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+			// function_call fields
+			CallID    string `json:"call_id"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"output"`
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal responses API response: %w", err)
+	}
+
+	var content strings.Builder
+	var toolCalls []ToolCall
+
+	for _, item := range apiResp.Output {
+		switch item.Type {
+		case "message":
+			for _, c := range item.Content {
+				if c.Type == "output_text" {
+					content.WriteString(c.Text)
+				}
+			}
+		case "function_call":
+			var args map[string]any
+			if err := json.Unmarshal([]byte(item.Arguments), &args); err != nil {
+				args = map[string]any{"raw": item.Arguments}
+			}
+			toolCalls = append(toolCalls, ToolCall{
+				ID:        item.CallID,
+				Name:      item.Name,
+				Arguments: args,
+			})
+		}
+	}
+
+	finishReason := "stop"
+	if len(toolCalls) > 0 {
+		finishReason = "tool_calls"
+	}
+	if apiResp.Status == "incomplete" {
+		finishReason = "length"
+	}
+
+	var usage *UsageInfo
+	if apiResp.Usage.TotalTokens > 0 {
+		usage = &UsageInfo{
+			PromptTokens:     apiResp.Usage.InputTokens,
+			CompletionTokens: apiResp.Usage.OutputTokens,
+			TotalTokens:      apiResp.Usage.TotalTokens,
+		}
+	}
+
+	return &LLMResponse{
+		Content:      content.String(),
+		ToolCalls:    toolCalls,
+		FinishReason: finishReason,
+		Usage:        usage,
+	}, nil
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────
+
 func normalizeModel(model, apiBase string) string {
 	idx := strings.Index(model, "/")
 	if idx == -1 {
@@ -240,7 +474,7 @@ func normalizeModel(model, apiBase string) string {
 
 	prefix := strings.ToLower(model[:idx])
 	switch prefix {
-	case "moonshot", "nvidia", "groq", "ollama", "deepseek", "google", "openrouter", "zhipu":
+	case "moonshot", "nvidia", "groq", "ollama", "deepseek", "google", "openrouter", "zhipu", "openai":
 		return model[idx+1:]
 	default:
 		return model

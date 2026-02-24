@@ -41,15 +41,12 @@ func thinSep(w int) string {
 	return PanelText.Render(strings.Repeat("─", sw))
 }
 
-// RenderBanner returns the styled startup header.
+// RenderBanner returns the styled startup header with the 🦞 brand logo.
 func (c *ChatRenderer) RenderBanner(version, model string, tools, skills int) string {
 	var b strings.Builder
 	b.WriteString("\n")
-	b.WriteString("  ")
-	b.WriteString(PrimaryText.Render("🦞 DevOpsClaw"))
-	b.WriteString(" ")
-	b.WriteString(MutedText.Render(version))
-	b.WriteString("\n\n")
+	b.WriteString(BrandLogo(version))
+	b.WriteString("\n")
 	b.WriteString(MutedText.Render(fmt.Sprintf("  model  %s", model)))
 	b.WriteString("\n")
 	b.WriteString(MutedText.Render(fmt.Sprintf("  tools  %d   skills  %d", tools, skills)))
@@ -76,7 +73,7 @@ func (c *ChatRenderer) RenderAgentResponse(content string) string {
 			body = strings.TrimRight(rendered, "\n")
 		}
 	}
-	return "\n" + AssistantBlockStyle.Render(body) + "\n"
+	return "\n" + AssistantBlockStyle.Render(Linkify(body)) + "\n"
 }
 
 // RenderSummaryMessage – thick blue left border, 2-line top margin.
@@ -126,6 +123,8 @@ func (c *ChatRenderer) RenderToolOutput(output string, isError bool) string {
 		text += "\n" + MutedText.Render(summary)
 	}
 
+	text = Linkify(text)
+
 	if isError {
 		return ErrorBlockStyle.Render(text)
 	}
@@ -173,13 +172,15 @@ func (c *ChatRenderer) RenderDivider() string {
 
 // RenderGoodbye – exit message.
 func (c *ChatRenderer) RenderGoodbye() string {
-	return "\n" + MutedText.Render("  👋 Goodbye!") + "\n\n"
+	return "\n" + MutedText.Render("  " + BrandEmoji + " Goodbye!") + "\n\n"
 }
 
-// RenderFooter – claudechic StatusFooter: model + context bar.
+// RenderFooter – claudechic StatusFooter: brand + model + context bar.
 func (c *ChatRenderer) RenderFooter(model string, contextPct float64) string {
 	w := MaxContentWidth(TerminalWidth())
-	left := MutedText.Render(model)
+	brand := PrimaryText.Render(BrandEmoji)
+	sep := PanelText.Render("·")
+	left := brand + " " + sep + " " + MutedText.Render(model)
 	right := RenderCtxBar(contextPct)
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 4
 	if gap < 1 {

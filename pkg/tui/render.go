@@ -6,11 +6,75 @@ package tui
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 )
+
+// ─── OSC 8 clickable hyperlinks ────────────────────────────────────────
+
+// urlRe matches http/https URLs in text for OSC 8 wrapping.
+var urlRe = regexp.MustCompile(`https?://[^\s\)\]>"'` + "`" + `]+`)
+
+// Linkify wraps bare http/https URLs in OSC 8 escape sequences so they
+// become clickable in terminals that support hyperlinks (iTerm2, Ghostty,
+// WezTerm, Windows Terminal, GNOME Terminal ≥ 3.26, etc.).
+// Format: ESC ] 8 ; params ; URI ST  text  ESC ] 8 ; ; ST
+func Linkify(s string) string {
+	return urlRe.ReplaceAllStringFunc(s, func(u string) string {
+		return "\x1b]8;;" + u + "\x1b\\" + u + "\x1b]8;;\x1b\\"
+	})
+}
+
+// ─── ANSI state propagation ────────────────────────────────────────────
+
+// ansiSeqRe matches ANSI CSI sequences (e.g. \x1b[38;2;204;119;0m).
+var ansiSeqRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// PropagateANSI ensures every line in a multi-line string is
+// ANSI-self-contained. The viewport splits content by \n and displays
+// an arbitrary window of lines. Without propagation, lines that depend
+// on an ANSI open code from a previous (now off-screen) line appear
+// as plain/missing text when scrolled to.
+//
+// Algorithm: walk lines, track the cumulative ANSI state, prepend it
+// to each line, and append a reset so the next line starts clean.
+func PropagateANSI(s string) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= 1 {
+		return s
+	}
+
+	const reset = "\x1b[0m"
+	var activeState string // accumulated ANSI SGR sequences
+
+	for i, line := range lines {
+		// Prepend the carried-over state to this line (if any)
+		if activeState != "" {
+			lines[i] = activeState + line
+		}
+
+		// Walk this line's ANSI sequences to update activeState.
+		// A reset (\x1b[0m) clears the state; everything else accumulates.
+		seqs := ansiSeqRe.FindAllString(line, -1)
+		for _, seq := range seqs {
+			if seq == reset {
+				activeState = ""
+			} else {
+				activeState += seq
+			}
+		}
+
+		// Append reset so the viewport can safely slice at any boundary
+		if activeState != "" {
+			lines[i] += reset
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
 
 // ─── Confirm prompt ────────────────────────────────────────────────────
 
@@ -43,7 +107,7 @@ func RenderConfirmBox(name, preview string, w, selectedIdx int) string {
 	}
 	optW := w - 8 // account for outer border + padding + pointer
 
-	title := PromptTitleStyle.Render("⚡ Allow " + name + "?")
+	title := PromptTitleStyle.Render(BrandEmoji + " Allow " + name + "?")
 	var previewLine string
 	if preview != "" {
 		previewLine = MutedText.Render("  " + preview)

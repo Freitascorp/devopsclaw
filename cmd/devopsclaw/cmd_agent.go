@@ -302,11 +302,15 @@ func interactiveModeTUI(agentLoop *agent.AgentLoop, sessionKey, modelName string
 		}
 	}()
 
-	// Run the Bubble Tea program (blocks until quit)
+	// Run the Bubble Tea program (blocks until quit).
+	// Suppress console logging so stderr doesn't bleed into the alt-screen.
+	logger.SuppressConsole()
 	if _, err := p.Run(); err != nil {
+		logger.EnableConsole()
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 		os.Exit(1)
 	}
+	logger.EnableConsole()
 }
 
 // interactiveModeReadline is the fallback readline-based interactive mode.

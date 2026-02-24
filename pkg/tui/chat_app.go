@@ -110,6 +110,9 @@ type ChatApp struct {
 	confirmPreview string
 	confirmCb      func(ConfirmChoice)
 
+	// Tool detail view: false = collapsed (default), true = expanded
+	toolsExpanded bool
+
 	// Rendering
 	md *glamour.TermRenderer
 
@@ -325,6 +328,14 @@ func (m ChatApp) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.chatView.HalfViewDown()
 		return m, nil
 
+	case "tab":
+		// Toggle tool/step detail blocks expanded/collapsed
+		m.toolsExpanded = !m.toolsExpanded
+		m = m.rebuildChatContent()
+		// Force full screen repaint — the content change is too large
+		// for the diff renderer, which leaves ghost footer lines.
+		return m, tea.ClearScreen
+
 	default:
 		// Grow textarea up to 10 lines
 		var cmd tea.Cmd
@@ -345,7 +356,7 @@ func (m ChatApp) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m ChatApp) View() string {
 	if m.quitting {
-		return MutedText.Render("  👋 Goodbye!") + "\n"
+		return MutedText.Render("  " + BrandEmoji + " Goodbye!") + "\n"
 	}
 
 	contentW := MaxContentWidth(m.width)
@@ -417,6 +428,10 @@ func (m ChatApp) rebuildChatContent() ChatApp {
 	}
 
 	content := strings.Join(blocks, "\n")
+	// Propagate ANSI state so every line is self-contained.
+	// Without this, scrolling up causes text to disappear because
+	// the viewport slices lines and upper lines' ANSI codes are lost.
+	content = PropagateANSI(content)
 	m.chatView.SetContent(content)
 	m.chatView.GotoBottom()
 	return m
@@ -437,6 +452,7 @@ func (m ChatApp) renderMessage(msg ChatMsg, w int) string {
 				body = strings.TrimRight(rendered, "\n")
 			}
 		}
+		body = Linkify(body)
 		return AssistantBlockStyle.Width(w + 2).Render(body)
 
 	case "summary":
@@ -449,35 +465,23 @@ func (m ChatApp) renderMessage(msg ChatMsg, w int) string {
 		return "\n" + SummaryBlockStyle.Width(w + 2).Render(body) + "\n"
 
 	case "tool":
-		header := FormatToolHdr(msg.ToolName, msg.ToolArgs)
-		var inner strings.Builder
-		inner.WriteString(ToolHdrText.Render(header))
-		if msg.ToolName == "exec" {
-			if cmd, ok := msg.ToolArgs["command"].(string); ok {
-				inner.WriteString("\n")
-				inner.WriteString(MutedText.Render("$ " + cmd))
-			}
-		}
-		if msg.Content != "" {
-			// Tool output
-			text := TruncateOutput(msg.Content, 15)
-			inner.WriteString("\n" + PanelText.Render("───") + "\n")
-			inner.WriteString(NormalText.Width(w).Render(text))
-			summary := FmtResultSummary(msg.Content, msg.IsError)
-			if summary != "" {
-				inner.WriteString("\n" + MutedText.Render(summary))
-			}
-		}
-		if msg.IsError {
-			return ErrorBlockStyle.Width(w + 2).Render(inner.String())
-		}
-		return ToolBlockStyle.Width(w + 2).Render(inner.String())
+		return m.renderToolMessage(msg, w)
 
 	case "error":
+		if !m.toolsExpanded {
+			// Collapsed: one-line error summary
+			errSnippet := TruncStr(msg.Content, 60)
+			return ErrorBlockStyle.Width(w + 2).Render(
+				ErrorText.Render("✘ ") + MutedText.Render(errSnippet))
+		}
 		return ErrorBlockStyle.Width(w + 2).Render(
 			ErrorText.Render("Error: " + msg.Content))
 
 	case "system":
+		if !m.toolsExpanded {
+			// Collapsed: hide step indicators and usage lines
+			return ""
+		}
 		return SystemBlockStyle.Width(w + 2).Render(msg.Content)
 
 	case "system-warn":
@@ -489,6 +493,57 @@ func (m ChatApp) renderMessage(msg ChatMsg, w int) string {
 	default:
 		return NormalText.Render(msg.Content)
 	}
+}
+
+// renderToolMessage renders a tool call or tool result, collapsed or expanded.
+func (m ChatApp) renderToolMessage(msg ChatMsg, w int) string {
+	// Tool call (has ToolName, no Content) — the invocation header
+	if msg.ToolName != "" && msg.Content == "" {
+		header := FormatToolHdr(msg.ToolName, msg.ToolArgs)
+		if !m.toolsExpanded {
+			// Collapsed: single line with arrow indicator
+			return ToolBlockStyle.Width(w + 2).Render(
+				MutedText.Render(header))
+		}
+		// Expanded: full header + exec preview
+		var inner strings.Builder
+		inner.WriteString(ToolHdrText.Render(Linkify(header)))
+		if msg.ToolName == "exec" {
+			if cmd, ok := msg.ToolArgs["command"].(string); ok {
+				inner.WriteString("\n")
+				inner.WriteString(MutedText.Render("$ " + cmd))
+			}
+		}
+		return ToolBlockStyle.Width(w + 2).Render(inner.String())
+	}
+
+	// Tool result (has Content) — the output
+	if msg.Content != "" {
+		resultTag := FmtResultSummary(msg.Content, msg.IsError)
+		if !m.toolsExpanded {
+			// Collapsed: tiny one-line result badge
+			icon := SecondaryText.Render("✓")
+			if msg.IsError {
+				icon = ErrorText.Render("✘")
+			}
+			return ToolBlockStyle.Width(w + 2).Render(
+				icon + " " + MutedText.Render(resultTag))
+		}
+		// Expanded: full output (same as before)
+		text := TruncateOutput(msg.Content, 15)
+		var inner strings.Builder
+		inner.WriteString(PanelText.Render("───") + "\n")
+		inner.WriteString(NormalText.Width(w).Render(Linkify(text)))
+		if resultTag != "" {
+			inner.WriteString("\n" + MutedText.Render(resultTag))
+		}
+		if msg.IsError {
+			return ErrorBlockStyle.Width(w + 2).Render(inner.String())
+		}
+		return ToolBlockStyle.Width(w + 2).Render(inner.String())
+	}
+
+	return ""
 }
 
 func (m ChatApp) renderConfirmBlock(msg ChatMsg, w int) string {
@@ -531,6 +586,7 @@ func (m ChatApp) renderFooter() string {
 		w = 80
 	}
 
+	brand := PrimaryText.Render(BrandEmoji)
 	modelLabel := MutedText.Render(m.model)
 	sep := PanelText.Render("·")
 
@@ -546,9 +602,17 @@ func (m ChatApp) renderFooter() string {
 	}
 	permRendered := permStyle.Render(permLabel)
 
+	detailLabel := "Details: off"
+	detailStyle := MutedText
+	if m.toolsExpanded {
+		detailLabel = "Details: on"
+		detailStyle = lipgloss.NewStyle().Foreground(ColorSecondary)
+	}
+	detailRendered := detailStyle.Render(detailLabel)
+
 	contextBar := RenderCtxBar(m.contextPct)
 
-	left := fmt.Sprintf(" %s %s %s", modelLabel, sep, permRendered)
+	left := fmt.Sprintf(" %s %s %s %s %s %s %s", brand, sep, modelLabel, sep, permRendered, sep, detailRendered)
 	right := fmt.Sprintf("%s ", contextBar)
 
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
@@ -556,7 +620,7 @@ func (m ChatApp) renderFooter() string {
 		gap = 1
 	}
 
-	return FooterStyle.Width(w).Render(
+	return FooterStyle.Width(w).MaxHeight(1).Render(
 		left + strings.Repeat(" ", gap) + right,
 	)
 }
@@ -580,6 +644,8 @@ func RunChatApp(modelName string) (*tea.Program, <-chan string) {
 	promptCh := make(chan string, 10)
 	app := NewChatApp(modelName)
 	app.promptCh = promptCh
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	// Mouse tracking is disabled — SGR escape sequences leak into the textarea
+	// as garbled text on fast scrolling. Use PgUp/PgDn for chat viewport scroll.
+	p := tea.NewProgram(app, tea.WithAltScreen())
 	return p, promptCh
 }

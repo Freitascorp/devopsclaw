@@ -138,6 +138,14 @@ func DefaultConfig() *Config {
 				APIKey:    "",
 			},
 
+			// OpenAI Codex - https://platform.openai.com/api-keys
+			{
+				ModelName: "gpt-5.2-codex",
+				Model:     "openai/gpt-5.2-codex",
+				APIBase:   "https://api.openai.com/v1",
+				APIKey:    "",
+			},
+
 			// Anthropic Claude - https://console.anthropic.com/settings/keys
 			{
 				ModelName: "claude-sonnet-4.6",
