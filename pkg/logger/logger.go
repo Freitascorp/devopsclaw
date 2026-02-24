@@ -30,10 +30,11 @@ var (
 		FATAL: "FATAL",
 	}
 
-	currentLevel = INFO
-	logger       *Logger
-	once         sync.Once
-	mu           sync.RWMutex
+	currentLevel    = INFO
+	suppressConsole bool
+	logger          *Logger
+	once            sync.Once
+	mu              sync.RWMutex
 )
 
 type Logger struct {
@@ -68,6 +69,21 @@ func GetLevel() LogLevel {
 	mu.RLock()
 	defer mu.RUnlock()
 	return currentLevel
+}
+
+// SuppressConsole disables stderr log output (e.g. while Bubble Tea owns the terminal).
+// File logging remains active.
+func SuppressConsole() {
+	mu.Lock()
+	defer mu.Unlock()
+	suppressConsole = true
+}
+
+// EnableConsole re-enables stderr log output.
+func EnableConsole() {
+	mu.Lock()
+	defer mu.Unlock()
+	suppressConsole = false
 }
 
 func EnableFileLogging(filePath string) error {
@@ -139,7 +155,9 @@ func logMessage(level LogLevel, component string, message string, fields map[str
 		fieldStr,
 	)
 
-	log.Println(logLine)
+	if !suppressConsole {
+		log.Println(logLine)
+	}
 
 	if level == FATAL {
 		os.Exit(1)

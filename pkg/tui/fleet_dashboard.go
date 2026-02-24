@@ -157,7 +157,7 @@ func (m FleetDashboard) View() string {
 	var b strings.Builder
 
 	// Title
-	b.WriteString(dTitleStyle.Render("🦞 DevOpsClaw Fleet Dashboard"))
+	b.WriteString(dTitleStyle.Render(BrandFull + " Fleet Dashboard"))
 	b.WriteString("\n")
 
 	// Summary bar – left-border block (claudechic style)

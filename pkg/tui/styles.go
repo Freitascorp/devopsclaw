@@ -5,6 +5,7 @@ package tui
 
 import (
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
@@ -117,6 +118,43 @@ var PromptOptionSelectedStyle = lipgloss.NewStyle().
 var PromptTitleStyle = lipgloss.NewStyle().
 	Foreground(ColorText).
 	PaddingBottom(1)
+
+// ─── Branding ──────────────────────────────────────────────────────────
+
+const (
+	BrandName  = "DevOpsClaw"
+	BrandEmoji = "🦞"
+	BrandFull  = "🦞 DevOpsClaw"
+)
+
+// BrandLogo returns a compact ASCII lobster with the product name.
+// Designed for startup banners / splash screens.
+func BrandLogo(version string) string {
+	lobster := []string{
+		`     ___`,
+		`    /   \    ╺┓`,
+		`   ( o.o )    ┃`,
+		`    > _ <    ╺┛`,
+		`   /|   |\`,
+		`  (_|   |_)`,
+	}
+	clawStyle := lipgloss.NewStyle().Foreground(ColorPrimary)
+	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary)
+	verStyle := lipgloss.NewStyle().Foreground(ColorMuted)
+	var b strings.Builder
+	for _, line := range lobster {
+		b.WriteString(clawStyle.Render(line))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(nameStyle.Render("  " + BrandFull))
+	if version != "" {
+		b.WriteString(" ")
+		b.WriteString(verStyle.Render(version))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
 
 // ─── Text styles ───────────────────────────────────────────────────────
 

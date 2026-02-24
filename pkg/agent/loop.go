@@ -67,7 +67,6 @@ var toolsRequiringConfirmation = map[string]bool{
 	"write_file": true,
 	"edit_file":  true,
 	"append_file": true,
-	"web_fetch":  true,
 	"browser":    true,
 }
 
