@@ -66,19 +66,61 @@ type Config struct {
 // FleetConfig configures the fleet management subsystem.
 type FleetConfig struct {
 	Enabled bool   `json:"enabled" env:"DEVOPSCLAW_FLEET_ENABLED"`
-	Store   string `json:"store"   env:"DEVOPSCLAW_FLEET_STORE"` // "memory", "file"
+	Store   string `json:"store"   env:"DEVOPSCLAW_FLEET_STORE"` // "memory", "sqlite", "postgres"
 	DataDir string `json:"data_dir" env:"DEVOPSCLAW_FLEET_DATA_DIR"`
+
+	// SQLite settings (when store = "sqlite")
+	SQLitePath string `json:"sqlite_path,omitempty" env:"DEVOPSCLAW_FLEET_SQLITE_PATH"` // default: <data_dir>/fleet.db
+
+	// PostgreSQL settings (when store = "postgres")
+	Postgres PostgresStoreConfig `json:"postgres,omitempty"`
+}
+
+// PostgresStoreConfig holds PostgreSQL connection parameters for the fleet store.
+type PostgresStoreConfig struct {
+	Host     string `json:"host"     env:"DEVOPSCLAW_PG_HOST"`
+	Port     int    `json:"port"     env:"DEVOPSCLAW_PG_PORT"`
+	User     string `json:"user"     env:"DEVOPSCLAW_PG_USER"`
+	Password string `json:"password" env:"DEVOPSCLAW_PG_PASSWORD"`
+	Database string `json:"database" env:"DEVOPSCLAW_PG_DATABASE"`
+	SSLMode  string `json:"ssl_mode" env:"DEVOPSCLAW_PG_SSLMODE"` // "disable", "require", "verify-full"
 }
 
 // RelayConfig configures the relay server or agent.
 type RelayConfig struct {
 	Enabled    bool   `json:"enabled"     env:"DEVOPSCLAW_RELAY_ENABLED"`
 	ListenAddr string `json:"listen_addr" env:"DEVOPSCLAW_RELAY_LISTEN_ADDR"`
-	AuthToken  string `json:"auth_token"  env:"DEVOPSCLAW_RELAY_AUTH_TOKEN"`
+	AuthToken  string `json:"auth_token"  env:"DEVOPSCLAW_RELAY_AUTH_TOKEN"` // legacy, prefer mTLS
 	MaxNodes   int    `json:"max_nodes"   env:"DEVOPSCLAW_RELAY_MAX_NODES"`
+
+	// mTLS configuration (replaces auth_token)
+	MTLS RelayMTLSConfig `json:"mtls,omitempty"`
+
 	// Agent mode: connect to a relay server
 	RelayAddr string `json:"relay_addr" env:"DEVOPSCLAW_RELAY_ADDR"`
 	NodeID    string `json:"node_id"    env:"DEVOPSCLAW_RELAY_NODE_ID"`
+
+	// HA configuration
+	HA RelayHAConfig `json:"ha,omitempty"`
+}
+
+// RelayMTLSConfig configures mutual TLS for the relay.
+type RelayMTLSConfig struct {
+	Enabled           bool   `json:"enabled"            env:"DEVOPSCLAW_RELAY_MTLS_ENABLED"`
+	CACertFile        string `json:"ca_cert_file"       env:"DEVOPSCLAW_RELAY_MTLS_CA_CERT"`
+	ServerCertFile    string `json:"server_cert_file"   env:"DEVOPSCLAW_RELAY_MTLS_SERVER_CERT"`
+	ServerKeyFile     string `json:"server_key_file"    env:"DEVOPSCLAW_RELAY_MTLS_SERVER_KEY"`
+	ClientCertFile    string `json:"client_cert_file"   env:"DEVOPSCLAW_RELAY_MTLS_CLIENT_CERT"`
+	ClientKeyFile     string `json:"client_key_file"    env:"DEVOPSCLAW_RELAY_MTLS_CLIENT_KEY"`
+	RequireClientCert bool   `json:"require_client_cert" env:"DEVOPSCLAW_RELAY_MTLS_REQUIRE_CLIENT_CERT"`
+}
+
+// RelayHAConfig configures relay high availability.
+type RelayHAConfig struct {
+	Enabled        bool     `json:"enabled"          env:"DEVOPSCLAW_RELAY_HA_ENABLED"`
+	InstanceID     string   `json:"instance_id"      env:"DEVOPSCLAW_RELAY_HA_INSTANCE_ID"`
+	PeerAddrs      []string `json:"peer_addrs"       env:"DEVOPSCLAW_RELAY_HA_PEERS"`
+	AdvertiseAddr  string   `json:"advertise_addr"   env:"DEVOPSCLAW_RELAY_HA_ADVERTISE_ADDR"`
 }
 
 // BrowserConfig configures the browser automation subsystem.

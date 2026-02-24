@@ -100,7 +100,26 @@ func (s *WSServer) Start(ctx context.Context) error {
 	go s.pingLoop(ctx)
 
 	var err error
-	if s.config.TLSConfig != nil {
+
+	// Priority: mTLS config → explicit TLSConfig → plain HTTP
+	if s.config.MTLS != nil && s.config.MTLS.CACertFile != "" {
+		// Build mTLS config from certificate files
+		tlsCfg, tlsErr := ServerTLSConfig(*s.config.MTLS)
+		if tlsErr != nil {
+			return fmt.Errorf("mTLS setup: %w", tlsErr)
+		}
+		s.httpSrv.TLSConfig = tlsCfg
+		s.logger.Info("relay server using mTLS",
+			"ca_cert", s.config.MTLS.CACertFile,
+			"require_client_cert", s.config.MTLS.RequireClientCert,
+		)
+		listener, lisErr := tls.Listen("tcp", s.config.ListenAddr, tlsCfg)
+		if lisErr != nil {
+			return lisErr
+		}
+		err = s.httpSrv.Serve(listener)
+	} else if s.config.TLSConfig != nil {
+		s.logger.Info("relay server using TLS (server-only, no mTLS)")
 		listener, lisErr := tls.Listen("tcp", s.config.ListenAddr, s.config.TLSConfig)
 		if lisErr != nil {
 			return lisErr
@@ -109,7 +128,7 @@ func (s *WSServer) Start(ctx context.Context) error {
 	} else {
 		// Warn when TLS is not configured for non-localhost addresses
 		if !strings.HasPrefix(s.config.ListenAddr, "127.0.0.1") && !strings.HasPrefix(s.config.ListenAddr, "localhost") {
-			s.logger.Warn("relay server starting WITHOUT TLS on non-localhost address — use TLS in production",
+			s.logger.Warn("relay server starting WITHOUT TLS on non-localhost address — use TLS or mTLS in production",
 				"addr", s.config.ListenAddr)
 		}
 		err = s.httpSrv.ListenAndServe()
@@ -138,14 +157,31 @@ func (s *WSServer) Stop(ctx context.Context) error {
 
 // handleAgentConnect handles WebSocket upgrade for node agents.
 func (s *WSServer) handleAgentConnect(w http.ResponseWriter, r *http.Request) {
-	// Auth check — constant-time comparison to prevent timing attacks
-	token := r.Header.Get("Authorization")
-	if s.config.AuthToken != "" {
+	// --- Authentication ---
+	// Prefer mTLS: if the connection has a verified client certificate, extract
+	// the node identity from the cert's CN. This eliminates shared secrets.
+	var mtlsIdentity *ClientIdentity
+	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+		id, err := VerifyClientCert(r.TLS)
+		if err != nil {
+			s.logger.Warn("mTLS client cert verification failed", "error", err, "remote", r.RemoteAddr)
+			http.Error(w, "certificate verification failed", http.StatusForbidden)
+			return
+		}
+		mtlsIdentity = id
+		s.logger.Info("mTLS authenticated", "node_id", id.NodeID, "fingerprint", id.Fingerprint)
+	} else if s.config.AuthToken != "" {
+		// Fallback: bearer token auth (for migration or non-mTLS setups)
+		token := r.Header.Get("Authorization")
 		expected := "Bearer " + s.config.AuthToken
 		if len(token) != len(expected) || subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+	} else if s.config.MTLS != nil && s.config.MTLS.RequireClientCert {
+		// mTLS is configured but no cert was presented and no token fallback
+		http.Error(w, "client certificate required", http.StatusUnauthorized)
+		return
 	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
@@ -172,7 +208,22 @@ func (s *WSServer) handleAgentConnect(w http.ResponseWriter, r *http.Request) {
 
 	nodeID := fleet.NodeID(regMsg.NodeID)
 	if nodeID == "" {
-		conn.Close(websocket.StatusProtocolError, "node_id required")
+		// If mTLS authenticated, use the cert CN as the node ID
+		if mtlsIdentity != nil {
+			nodeID = fleet.NodeID(mtlsIdentity.NodeID)
+		} else {
+			conn.Close(websocket.StatusProtocolError, "node_id required")
+			return
+		}
+	}
+
+	// If mTLS is present, verify the registration node_id matches the cert CN
+	if mtlsIdentity != nil && string(nodeID) != mtlsIdentity.NodeID {
+		s.logger.Warn("node_id mismatch with mTLS cert",
+			"registration_id", nodeID,
+			"cert_cn", mtlsIdentity.NodeID,
+		)
+		conn.Close(websocket.StatusProtocolError, "node_id does not match certificate CN")
 		return
 	}
 
@@ -509,14 +560,27 @@ func (a *WSAgent) connectAndServeWS(ctx context.Context) error {
 
 	// Connect
 	dialOpts := &websocket.DialOptions{}
+
+	// Prefer mTLS client config if available
+	if a.config.MTLS != nil && a.config.MTLS.ClientCertFile != "" {
+		tlsCfg, tlsErr := ClientTLSConfig(*a.config.MTLS)
+		if tlsErr != nil {
+			return fmt.Errorf("mTLS client setup: %w", tlsErr)
+		}
+		dialOpts.HTTPClient = &http.Client{
+			Transport: &http.Transport{TLSClientConfig: tlsCfg},
+		}
+		a.logger.Info("using mTLS authentication", "cert", a.config.MTLS.ClientCertFile)
+	} else if a.config.TLSConfig != nil {
+		dialOpts.HTTPClient = &http.Client{
+			Transport: &http.Transport{TLSClientConfig: a.config.TLSConfig},
+		}
+	}
+
+	// Bearer token auth (legacy fallback, used when mTLS is not configured)
 	if a.config.AuthToken != "" {
 		dialOpts.HTTPHeader = http.Header{
 			"Authorization": []string{"Bearer " + a.config.AuthToken},
-		}
-	}
-	if a.config.TLSConfig != nil {
-		dialOpts.HTTPClient = &http.Client{
-			Transport: &http.Transport{TLSClientConfig: a.config.TLSConfig},
 		}
 	}
 

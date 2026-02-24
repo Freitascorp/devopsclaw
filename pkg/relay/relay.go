@@ -34,9 +34,10 @@ import (
 type ServerConfig struct {
 	ListenAddr string        `json:"listen_addr"` // e.g., ":9443"
 	TLSConfig  *tls.Config   `json:"tls_config,omitempty"`
-	AuthToken  string        `json:"auth_token"` // shared secret for node auth (production: use mTLS)
+	AuthToken  string        `json:"auth_token"` // shared secret for node auth (legacy, prefer mTLS)
 	MaxNodes   int           `json:"max_nodes"`
 	PingInterval time.Duration `json:"ping_interval"`
+	MTLS       *MTLSConfig   `json:"mtls,omitempty"` // mTLS config (replaces AuthToken)
 }
 
 // Server is the relay server that brokers connections between the
@@ -182,8 +183,9 @@ func (s *Server) ConnectedNodes() []fleet.NodeID {
 type AgentConfig struct {
 	RelayAddr    string        `json:"relay_addr"` // e.g., "relay.example.com:9443"
 	NodeID       fleet.NodeID  `json:"node_id"`
-	AuthToken    string        `json:"auth_token"`
+	AuthToken    string        `json:"auth_token"` // legacy, prefer mTLS
 	TLSConfig    *tls.Config   `json:"tls_config,omitempty"`
+	MTLS         *MTLSConfig   `json:"mtls,omitempty"` // mTLS config (replaces AuthToken)
 	ReconnectInterval time.Duration `json:"reconnect_interval"`
 	HeartbeatInterval time.Duration `json:"heartbeat_interval"`
 }
