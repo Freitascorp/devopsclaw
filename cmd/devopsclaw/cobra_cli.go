@@ -128,6 +128,7 @@ deployment strategies, browser automation, runbooks, and a full audit trail.`,
 		newAuditCmd(),
 		newRelayCmd(),
 		newAgentDaemonCmd(),
+		newMCPCobraCmd(),
 	)
 
 	return root
@@ -1286,6 +1287,45 @@ func runAgentOnce(cfg *config.Config, message string) error {
 	defer func() { os.Args = originalArgs }()
 	agentCmd()
 	return nil
+}
+
+// ------------------------------------------------------------------
+// `devopsclaw mcp` — Model Context Protocol stdio server
+// ------------------------------------------------------------------
+
+func newMCPCobraCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "mcp",
+		Short: "Start MCP stdio server (for Gemini CLI, Claude Desktop, etc.)",
+		Long: `Start a Model Context Protocol (MCP) server over stdio.
+
+This exposes devopsclaw's tools (exec, read_file, write_file, edit_file,
+list_directory, web_search, web_fetch, etc.) as MCP tools that external
+AI clients can call.
+
+Gemini CLI configuration (~/.gemini/settings.json):
+  {
+    "mcpServers": {
+      "devopsclaw": {
+        "command": "devopsclaw",
+        "args": ["mcp"]
+      }
+    }
+  }
+
+Claude Desktop configuration:
+  {
+    "mcpServers": {
+      "devopsclaw": {
+        "command": "devopsclaw",
+        "args": ["mcp"]
+      }
+    }
+  }`,
+		Run: func(cmd *cobra.Command, args []string) {
+			mcpCmd()
+		},
+	}
 }
 
 // ------------------------------------------------------------------

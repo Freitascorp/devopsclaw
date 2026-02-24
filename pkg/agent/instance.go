@@ -58,6 +58,10 @@ func NewAgentInstance(
 	toolsRegistry.Register(tools.NewEditFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict))
 
+	// Gemini CLI tool — lets the agent delegate tasks to Gemini AI via terminal.
+	// Used primarily for BMAD method workflows (AI-to-AI delegation).
+	toolsRegistry.Register(tools.NewGeminiTool(workspace))
+
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessionsManager := session.NewSessionManager(sessionsDir)
 
