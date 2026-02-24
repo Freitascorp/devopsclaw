@@ -96,7 +96,7 @@ var (
 			PermDockerView, PermDockerManage,
 			PermK8sView, PermK8sManage,
 			PermBrowserExec,
-			PermAgentView, PermAgentSwitch,
+			PermAgentView, PermAgentSwitch, PermAgentManage,
 			PermCronView, PermCronManage,
 			PermAuditView,
 		},

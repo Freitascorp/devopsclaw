@@ -235,8 +235,12 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 	}
 
 	if err != nil {
+		// Enrich error output with actionable hints for common IaC/DevOps errors.
+		// Hints are appended to the LLM-facing output only, so the LLM gets
+		// domain-specific guidance while the user still sees the raw error.
+		enriched := enrichErrorOutput(output)
 		return &ToolResult{
-			ForLLM:  output,
+			ForLLM:  enriched,
 			ForUser: output,
 			IsError: true,
 		}

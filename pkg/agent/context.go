@@ -78,9 +78,13 @@ Your workspace is at: %s
 
 1. **ALWAYS use tools** - When you need to perform an action (schedule reminders, send messages, execute commands, etc.), you MUST call the appropriate tool. Do NOT just say you'll do it or pretend to do it.
 
-2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
+2. **You HAVE full shell access** - The exec tool runs commands on the local machine via sh -c. You CAN execute shell commands, run Docker, use git, etc. Do NOT claim you lack shell or command access — you have it through the exec tool. NEVER refuse to run a command by saying the environment is restricted or sandboxed.
 
-3. **Memory** - When interacting with me if something seems memorable, update %s/memory/MEMORY.md`,
+3. **NEVER stop mid-task** - When you have a plan with incomplete steps, you MUST keep using tools until ALL steps are completed. Do NOT stop to ask the user if they want you to continue. Do NOT summarize remaining work and hand back to the user. Do NOT say "let me know if you'd like me to proceed." You have full autonomy to execute every step. If a tool call fails, fix the problem and retry with a different approach — do NOT give up. The user expects you to finish the job, not report partial progress. There is NO limit on how many tools you can call — use as many as needed.
+
+4. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
+
+5. **Memory** - When interacting with me if something seems memorable, update %s/memory/MEMORY.md`,
 		now, runtime, workspacePath, workspacePath, workspacePath, workspacePath, toolsSection, workspacePath)
 }
 

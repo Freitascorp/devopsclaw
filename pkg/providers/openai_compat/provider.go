@@ -265,18 +265,22 @@ func (p *Provider) chatResponses(
 				})
 			} else {
 				inputItems = append(inputItems, map[string]any{
-					"type":    "message",
-					"role":    "user",
-					"content": msg.Content,
+					"type": "message",
+					"role": "user",
+					"content": []map[string]any{
+						{"type": "input_text", "text": msg.Content},
+					},
 				})
 			}
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
 				if msg.Content != "" {
 					inputItems = append(inputItems, map[string]any{
-						"type":    "message",
-						"role":    "assistant",
-						"content": msg.Content,
+						"type": "message",
+						"role": "assistant",
+						"content": []map[string]any{
+							{"type": "output_text", "text": msg.Content},
+						},
 					})
 				}
 				for _, tc := range msg.ToolCalls {
@@ -301,9 +305,11 @@ func (p *Provider) chatResponses(
 				}
 			} else {
 				inputItems = append(inputItems, map[string]any{
-					"type":    "message",
-					"role":    "assistant",
-					"content": msg.Content,
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": msg.Content},
+					},
 				})
 			}
 		case "tool":

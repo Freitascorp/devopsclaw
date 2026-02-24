@@ -101,12 +101,9 @@ Rules:
 - Only ONE step should be "in-progress" at a time
 - Mark steps "completed" immediately after finishing each one
 - Use short, action-oriented titles (3-8 words)
-<<<<<<< Updated upstream
-=======
 - NEVER stop working until ALL steps are completed
 - If a step fails, adapt and retry — do NOT abandon the plan
 - Do NOT ask the user for permission to continue to the next step
->>>>>>> Stashed changes
 
 Status values: "not-started", "in-progress", "completed"`
 }

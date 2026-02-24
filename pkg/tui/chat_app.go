@@ -156,8 +156,11 @@ func NewChatApp(modelName string) ChatApp {
 	vp := viewport.New(80, 20)
 	vp.Style = lipgloss.NewStyle()
 
-	// Glamour markdown renderer
-	cw := 90
+	// Glamour markdown renderer — use dynamic content width
+	cw := MaxContentWidth(80) - 6 // border + padding
+	if cw < 40 {
+		cw = 40
+	}
 	md, _ := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 		glamour.WithWordWrap(cw),
@@ -198,6 +201,17 @@ func (m ChatApp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Recreate glamour renderer with new width so markdown wraps correctly
+		newCW := MaxContentWidth(m.width) - 6
+		if newCW < 40 {
+			newCW = 40
+		}
+		if newMD, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithWordWrap(newCW),
+		); err == nil {
+			m.md = newMD
+		}
 		m = m.recalcLayout()
 		return m, nil
 
@@ -220,6 +234,8 @@ func (m ChatApp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.Active {
 			m.spinnerFrame = 0
 		}
+		// Recalc layout: thinking line is 0 or 1 row, affects viewport height.
+		m = m.recalcLayout()
 		return m, nil
 
 	case ContextUpdateMsg:
@@ -444,9 +460,13 @@ func (m ChatApp) recalcLayout() ChatApp {
 	}
 	inputH := inputLines + 2
 
-	// Footer = 1, thinking indicator = 1, plan panel = variable
+	// Footer = 1, thinking indicator = 0 or 1, plan panel = variable
 	planH := m.planPanelHeight()
-	chatH := m.height - inputH - 1 - 1 - planH
+	thinkH := 0
+	if m.thinking {
+		thinkH = 1
+	}
+	chatH := m.height - inputH - 1 - thinkH - planH
 	if chatH < 3 {
 		chatH = 3
 	}
@@ -602,8 +622,10 @@ func (m ChatApp) renderConfirmBlock(msg ChatMsg, w int) string {
 
 func (m ChatApp) renderThinking(w int) string {
 	if !m.thinking {
-		// Reserve 1 line of space
-		return strings.Repeat(" ", w)
+		// Return empty string — no blank line reservation.
+		// Reserving a full line of spaces caused layout jank
+		// (ghost lines, double thinking indicators).
+		return ""
 	}
 	frame := SpinnerFrameSet[m.spinnerFrame%len(SpinnerFrameSet)]
 	return MutedText.Render(fmt.Sprintf("  %s thinking…", frame))

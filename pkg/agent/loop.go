@@ -621,10 +621,10 @@ func (al *AgentLoop) runLLMIteration(
 	const maxAbsoluteIterations = 200
 
 	// Repetition detector: if the LLM calls the exact same tool with the
-	// exact same arguments 3+ times, it's stuck in a loop. Force-break
-	// by injecting a system nudge telling it to stop and summarize.
+	// exact same arguments 4+ times, it's stuck in a loop. Inject a nudge
+	// telling it to try a different approach (NOT to stop using tools).
 	toolCallCounts := make(map[string]int) // key = "toolName:argsJSON"
-	const maxToolRepeat = 3
+	const maxToolRepeat = 4
 
 	for {
 		iteration++
@@ -817,18 +817,29 @@ func (al *AgentLoop) runLLMIteration(
 			}
 		}
 		if repeatDetected {
-			logger.WarnCF("agent", "Detected repeated tool call loop, forcing answer",
+			logger.WarnCF("agent", "Detected repeated tool call loop, redirecting",
 				map[string]any{
 					"agent_id":  agent.ID,
 					"iteration": iteration,
 				})
-			// Inject a tool-result nudge telling the LLM to stop looping
+			// Inject a nudge telling the LLM to try a DIFFERENT approach,
+			// NOT to stop using tools entirely. The previous nudge ("Stop
+			// calling tools") caused the LLM to abandon multi-step plans.
 			nudge := providers.Message{
 				Role:    "user",
-				Content: "You are repeating the same tool call. Stop calling tools and provide the best answer you can with the information you already have.",
+				Content: "SYSTEM: You are calling the same tool with the same arguments repeatedly. " +
+					"This is not making progress. Try a DIFFERENT approach:\n" +
+					"- If a command failed, fix the underlying issue before re-running it.\n" +
+					"- If you're stuck, read error output carefully and adapt.\n" +
+					"- Use a different tool or different arguments.\n" +
+					"Do NOT stop working on the task. Continue making progress with different actions.",
 			}
 			messages = append(messages, nudge)
-			// Give it one more chance to answer without tools
+			// Reset the repeat counter so the LLM gets a fresh chance
+			// with different tool calls before being nudged again.
+			for k := range toolCallCounts {
+				delete(toolCallCounts, k)
+			}
 			continue
 		}
 
@@ -1009,15 +1020,19 @@ func (al *AgentLoop) runLLMIteration(
 				contentForLLM = toolResult.Err.Error()
 			}
 
-			// Emit tool result event — UI shows the output
-			al.emit(AgentEvent{
-				Type:       EventToolResult,
-				Iteration:  iteration,
-				ToolName:   tc.Name,
-				ToolID:     tc.ID,
-				ToolOutput: contentForLLM,
-				IsError:    toolResult.IsError,
-			})
+			// Emit tool result event — UI shows the output.
+			// Skip for silent results (e.g. plan tool) to avoid duplicating
+			// content that already has its own event path (EventPlanUpdate).
+			if !toolResult.Silent {
+				al.emit(AgentEvent{
+					Type:       EventToolResult,
+					Iteration:  iteration,
+					ToolName:   tc.Name,
+					ToolID:     tc.ID,
+					ToolOutput: contentForLLM,
+					IsError:    toolResult.IsError,
+				})
+			}
 
 			toolResultMsg := providers.Message{
 				Role:       "tool",

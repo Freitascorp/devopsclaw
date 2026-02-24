@@ -108,6 +108,10 @@ func agentCmd() {
 				fmt.Printf("  %s\n", chat.RenderIterationBadge(event.Iteration, event.MaxIter))
 			}
 		case agent.EventToolCall:
+			// Skip plan tool — the plan panel handles it.
+			if event.ToolName == "plan" {
+				break
+			}
 			clearSpinnerLine()
 			fmt.Println(chat.RenderToolCall(event.ToolName, event.ToolArgs))
 		case agent.EventToolResult:
@@ -195,11 +199,15 @@ func interactiveModeTUI(agentLoop *agent.AgentLoop, sessionKey, modelName string
 			if event.Iteration > 1 {
 				p.Send(tui.AppendChatMsg{Msg: tui.ChatMsg{
 					Role:    "system",
-					Content: fmt.Sprintf("── step %d/%d ──", event.Iteration, event.MaxIter),
+					Content: fmt.Sprintf("── step %d ──", event.Iteration),
 					Time:    time.Now(),
 				}})
 			}
 		case agent.EventToolCall:
+			// Skip plan tool — the dedicated plan panel handles it.
+			if event.ToolName == "plan" {
+				break
+			}
 			p.Send(tui.AppendChatMsg{Msg: tui.ChatMsg{
 				Role:     "tool",
 				ToolName: event.ToolName,
@@ -293,7 +301,9 @@ func interactiveModeTUI(agentLoop *agent.AgentLoop, sessionKey, modelName string
 	// Goroutine: read prompts from TUI and feed to agent loop
 	go func() {
 		for text := range promptCh {
-			p.Send(tui.ThinkingMsg{Active: true})
+			// Note: ThinkingMsg{Active: true} is NOT sent here.
+			// The agent loop's EventThinking handler already does it,
+			// sending it here too caused duplicate "thinking…" lines.
 
 			ctx := context.Background()
 			response, err := agentLoop.ProcessDirect(ctx, text, sessionKey)
