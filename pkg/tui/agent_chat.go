@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/freitascorp/devopsclaw/pkg/tools"
 )
 
 // ChatRenderer handles styled output for the agent interactive chat (print mode).
@@ -150,9 +151,10 @@ func (c *ChatRenderer) RenderThinking(frame int) string {
 	return MutedText.Render(fmt.Sprintf("  %s thinking…", f))
 }
 
-// RenderIterationBadge – step N/M in muted text.
+// RenderIterationBadge – step N in muted text.
+// Shows just the step number — the agent runs until the task is done.
 func (c *ChatRenderer) RenderIterationBadge(iter, max int) string {
-	return MutedText.Render(fmt.Sprintf("── step %d/%d ──", iter, max))
+	return MutedText.Render(fmt.Sprintf("── step %d ──", iter))
 }
 
 // RenderUsage – compact token-usage summary line.
@@ -163,6 +165,36 @@ func (c *ChatRenderer) RenderUsage(prompt, completion, total int) string {
 // RenderError – red left border with "Error: " prefix.
 func (c *ChatRenderer) RenderError(msg string) string {
 	return ErrorBlockStyle.Render(ErrorText.Render("Error: " + msg))
+}
+
+// RenderPlan – Copilot-style plan display for one-shot / non-interactive mode.
+func (c *ChatRenderer) RenderPlan(steps []tools.PlanStep) string {
+	if len(steps) == 0 {
+		return ""
+	}
+	done := 0
+	for _, s := range steps {
+		if s.Status == tools.PlanCompleted {
+			done++
+		}
+	}
+	header := SecondaryText.Render(fmt.Sprintf("  ▾ Plan (%d/%d)", done, len(steps)))
+	var lines []string
+	lines = append(lines, header)
+	for _, s := range steps {
+		icon := "○"
+		style := MutedText
+		switch s.Status {
+		case tools.PlanInProgress:
+			icon = "◉"
+			style = PrimaryText
+		case tools.PlanCompleted:
+			icon = "✓"
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color("#66aa66"))
+		}
+		lines = append(lines, style.Render(fmt.Sprintf("    %s %s", icon, s.Title)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // RenderDivider – subtle horizontal rule in panel color.

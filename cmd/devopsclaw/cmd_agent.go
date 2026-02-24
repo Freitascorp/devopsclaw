@@ -126,6 +126,11 @@ func agentCmd() {
 		case agent.EventError:
 			clearSpinnerLine()
 			fmt.Println(chat.RenderError(event.Content))
+		case agent.EventPlanUpdate:
+			clearSpinnerLine()
+			if len(event.PlanSteps) > 0 {
+				fmt.Println(chat.RenderPlan(event.PlanSteps))
+			}
 		}
 	})
 
@@ -230,6 +235,16 @@ func interactiveModeTUI(agentLoop *agent.AgentLoop, sessionKey, modelName string
 				Content: event.Content,
 				Time:    time.Now(),
 			}})
+		case agent.EventPlanUpdate:
+			steps := make([]tui.PlanDisplayStep, len(event.PlanSteps))
+			for i, s := range event.PlanSteps {
+				steps[i] = tui.PlanDisplayStep{
+					ID:     s.ID,
+					Title:  s.Title,
+					Status: string(s.Status),
+				}
+			}
+			p.Send(tui.PlanUpdateMsg{Steps: steps})
 		}
 	})
 

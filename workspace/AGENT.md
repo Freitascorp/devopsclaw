@@ -14,6 +14,7 @@ When the user asks you to do something, **do it**. Use your tools and skills to 
 
 | Tool | Purpose |
 |------|---------|
+| `plan` | Create and track a visible task plan — show the user what steps you'll take |
 | `exec` | Run any shell command on the local machine |
 | `read_file` | Read files, configs, logs, skill docs |
 | `write_file` | Create or overwrite files |
@@ -29,6 +30,29 @@ When the user asks you to do something, **do it**. Use your tools and skills to 
 | `find_skills` | Search the skill registry for capabilities |
 | `install_skill` | Install new skills on demand |
 | `fleet` | Execute commands across fleets of servers |
+
+---
+
+## Task Planning
+
+For complex multi-step tasks, **always create a plan first** using the `plan` tool. This gives the user visibility into what you're doing and tracks your progress.
+
+### How to use the plan tool:
+1. **Before starting work**: Call `plan` with all steps listed as "not-started"
+2. **When starting a step**: Call `plan` with that step as "in-progress"
+3. **After finishing a step**: Call `plan` with that step as "completed" (immediately)
+4. **Send ALL steps every time** — the full list replaces the previous plan
+5. Only **one step** can be "in-progress" at a time
+
+### When to plan:
+- Tasks with 3+ distinct steps
+- Infrastructure changes (terraform, deployments, migrations)
+- Debugging workflows (gather info → diagnose → fix → verify)
+- Any task where the user asked you to "set up", "deploy", "migrate", or "fix"
+
+### When NOT to plan:
+- Simple single-step tasks (answer a question, read a file, run one command)
+- Conversational/informational requests
 
 ---
 

@@ -54,6 +54,16 @@ type ContextUpdateMsg struct{ Pct float64 }
 // UsageMsg shows token usage.
 type UsageMsg struct{ Prompt, Completion, Total int }
 
+// PlanUpdateMsg updates the visible task plan.
+type PlanUpdateMsg struct{ Steps []PlanDisplayStep }
+
+// PlanDisplayStep is a UI-friendly version of a plan step.
+type PlanDisplayStep struct {
+	ID     int
+	Title  string
+	Status string // "not-started", "in-progress", "completed"
+}
+
 // ResponseDoneMsg signals the agent finished responding.
 type ResponseDoneMsg struct{}
 
@@ -112,6 +122,10 @@ type ChatApp struct {
 
 	// Tool detail view: false = collapsed (default), true = expanded
 	toolsExpanded bool
+
+	// Plan tracking (Copilot-style task plan)
+	planSteps    []PlanDisplayStep
+	planExpanded bool // collapsible plan panel
 
 	// Rendering
 	md *glamour.TermRenderer
@@ -210,6 +224,25 @@ func (m ChatApp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ContextUpdateMsg:
 		m.contextPct = msg.Pct
+		return m, nil
+
+	case PlanUpdateMsg:
+		m.planSteps = msg.Steps
+		if len(msg.Steps) > 0 {
+			m.planExpanded = true
+		}
+		// Check if all steps are completed — auto-collapse when done
+		allDone := len(msg.Steps) > 0
+		for _, s := range msg.Steps {
+			if s.Status != "completed" {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			m.planExpanded = false
+		}
+		m = m.recalcLayout()
 		return m, nil
 
 	case UsageMsg:
@@ -336,6 +369,15 @@ func (m ChatApp) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// for the diff renderer, which leaves ghost footer lines.
 		return m, tea.ClearScreen
 
+	case "ctrl+p":
+		// Toggle plan panel expanded/collapsed
+		if len(m.planSteps) > 0 {
+			m.planExpanded = !m.planExpanded
+			m = m.recalcLayout()
+			return m, tea.ClearScreen
+		}
+		return m, nil
+
 	default:
 		// Grow textarea up to 10 lines
 		var cmd tea.Cmd
@@ -367,7 +409,12 @@ func (m ChatApp) View() string {
 	// 1. Chat viewport
 	sections = append(sections, m.chatView.View())
 
-	// 2. Thinking indicator (1 line, above input)
+	// 2. Plan panel (collapsible, above thinking indicator)
+	if planPanel := m.renderPlanPanel(contentW); planPanel != "" {
+		sections = append(sections, planPanel)
+	}
+
+	// 3. Thinking indicator (1 line, above input)
 	thinkLine := m.renderThinking(contentW)
 	sections = append(sections, thinkLine)
 
@@ -397,8 +444,9 @@ func (m ChatApp) recalcLayout() ChatApp {
 	}
 	inputH := inputLines + 2
 
-	// Footer = 1, thinking indicator = 1
-	chatH := m.height - inputH - 1 - 1
+	// Footer = 1, thinking indicator = 1, plan panel = variable
+	planH := m.planPanelHeight()
+	chatH := m.height - inputH - 1 - 1 - planH
 	if chatH < 3 {
 		chatH = 3
 	}
@@ -561,6 +609,64 @@ func (m ChatApp) renderThinking(w int) string {
 	return MutedText.Render(fmt.Sprintf("  %s thinking…", frame))
 }
 
+// ─── Plan panel ────────────────────────────────────────────────────────
+
+// planPanelHeight returns the height consumed by the plan panel (0 if hidden).
+func (m ChatApp) planPanelHeight() int {
+	if len(m.planSteps) == 0 {
+		return 0
+	}
+	if !m.planExpanded {
+		return 1 // collapsed: just the header line
+	}
+	// Header + each step + blank line below
+	return 1 + len(m.planSteps) + 1
+}
+
+// renderPlanPanel renders the collapsible Copilot-style plan tracker.
+func (m ChatApp) renderPlanPanel(w int) string {
+	if len(m.planSteps) == 0 {
+		return ""
+	}
+
+	done := 0
+	for _, s := range m.planSteps {
+		if s.Status == "completed" {
+			done++
+		}
+	}
+	total := len(m.planSteps)
+
+	if !m.planExpanded {
+		// Collapsed: single line summary
+		chevron := "▸"
+		header := fmt.Sprintf(" %s Plan (%d/%d)", chevron, done, total)
+		return MutedText.Render(header)
+	}
+
+	// Expanded: header + steps
+	chevron := "▾"
+	header := SecondaryText.Render(fmt.Sprintf(" %s Plan (%d/%d)", chevron, done, total))
+
+	var lines []string
+	lines = append(lines, header)
+	for _, s := range m.planSteps {
+		icon := "○"
+		style := MutedText
+		switch s.Status {
+		case "in-progress":
+			icon = "◉"
+			style = PrimaryText
+		case "completed":
+			icon = "✓"
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color("#66aa66"))
+		}
+		lines = append(lines, style.Render(fmt.Sprintf("   %s %s", icon, s.Title)))
+	}
+
+	return PlanPanelStyle.Width(w).Render(strings.Join(lines, "\n"))
+}
+
 // ─── Input box ─────────────────────────────────────────────────────────
 
 func (m ChatApp) renderInput(contentW int) string {
@@ -610,9 +716,26 @@ func (m ChatApp) renderFooter() string {
 	}
 	detailRendered := detailStyle.Render(detailLabel)
 
+	// Plan indicator
+	planRendered := ""
+	if len(m.planSteps) > 0 {
+		done := 0
+		for _, s := range m.planSteps {
+			if s.Status == "completed" {
+				done++
+			}
+		}
+		planLabel := fmt.Sprintf("Plan: %d/%d", done, len(m.planSteps))
+		planStyle := lipgloss.NewStyle().Foreground(ColorSecondary)
+		if done == len(m.planSteps) {
+			planStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#66aa66"))
+		}
+		planRendered = sep + " " + planStyle.Render(planLabel) + " "
+	}
+
 	contextBar := RenderCtxBar(m.contextPct)
 
-	left := fmt.Sprintf(" %s %s %s %s %s %s %s", brand, sep, modelLabel, sep, permRendered, sep, detailRendered)
+	left := fmt.Sprintf(" %s %s %s %s %s %s %s %s", brand, sep, modelLabel, sep, permRendered, sep, detailRendered, planRendered)
 	right := fmt.Sprintf("%s ", contextBar)
 
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right)

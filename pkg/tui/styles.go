@@ -192,6 +192,15 @@ var FooterStyle = lipgloss.NewStyle().
 	Background(ColorSurface).
 	Foreground(ColorMuted)
 
+// ─── Plan panel ────────────────────────────────────────────────────────
+// Visible task plan panel (Copilot-style todo tracker)
+var PlanPanelStyle = lipgloss.NewStyle().
+	Border(TallBorder).
+	BorderLeft(true).BorderTop(false).BorderBottom(false).BorderRight(false).
+	BorderForeground(ColorSecondary).
+	PaddingLeft(1).
+	Foreground(ColorText)
+
 // ─── Spinner ───────────────────────────────────────────────────────────
 // Braille spinner from claudechic/widgets/primitives/spinner.py
 var SpinnerFrameSet = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}

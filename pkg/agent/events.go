@@ -3,6 +3,8 @@
 
 package agent
 
+import "github.com/freitascorp/devopsclaw/pkg/tools"
+
 // EventType classifies agent loop events for real-time UI rendering.
 // This enables a Claude Code–style experience where the user can see
 // tool calls, intermediate results, and reasoning as they happen.
@@ -21,6 +23,8 @@ const (
 	EventResponse
 	// EventError signals an error during processing.
 	EventError
+	// EventPlanUpdate signals the agent's task plan has changed.
+	EventPlanUpdate
 )
 
 // AgentEvent represents a single event during the agentic loop.
@@ -45,6 +49,9 @@ type AgentEvent struct {
 
 	// Response/error content (EventResponse, EventError)
 	Content string
+
+	// Plan fields (EventPlanUpdate)
+	PlanSteps []tools.PlanStep
 
 	// Token usage — cumulative across all iterations
 	PromptTokens     int

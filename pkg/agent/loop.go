@@ -45,6 +45,7 @@ type AgentLoop struct {
 	eventCb         EventCallback
 	sessionAllowed  map[string]bool // tools the user allowed for the whole session
 	totalUsage     usageAccumulator
+	planState      *tools.PlanState // shared plan state for task tracking
 }
 
 // ConfirmResult represents the user's decision on a tool confirmation prompt.
@@ -115,7 +116,9 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 
 	toolGuard := rbac.NewToolGuard(enforcer, cfg.RBAC.Enabled)
 
-	return &AgentLoop{
+	planState := &tools.PlanState{}
+
+	al := &AgentLoop{
 		bus:            msgBus,
 		cfg:            cfg,
 		registry:       registry,
@@ -124,7 +127,25 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 		fallback:       fallbackChain,
 		toolGuard:      toolGuard,
 		sessionAllowed: make(map[string]bool),
+		planState:      planState,
 	}
+
+	// Register plan tool for all agents — callback emits events to the UI
+	for _, agentID := range registry.ListAgentIDs() {
+		agent, ok := registry.GetAgent(agentID)
+		if !ok {
+			continue
+		}
+		planTool := tools.NewPlanTool(planState, func(steps []tools.PlanStep) {
+			al.emit(AgentEvent{
+				Type:      EventPlanUpdate,
+				PlanSteps: steps,
+			})
+		})
+		agent.Tools.Register(planTool)
+	}
+
+	return al
 }
 
 // SetConfirmCallback sets a callback that is invoked before executing tools
@@ -581,6 +602,9 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, agent *AgentInstance, opt
 }
 
 // runLLMIteration executes the LLM call loop with tool handling.
+// The loop runs until the LLM returns a text response (no tool calls),
+// the repetition detector fires, or the hard safety brake is hit.
+// agent.MaxIterations is a soft checkpoint — logs a warning but does NOT stop.
 func (al *AgentLoop) runLLMIteration(
 	ctx context.Context,
 	agent *AgentInstance,
@@ -590,6 +614,11 @@ func (al *AgentLoop) runLLMIteration(
 	iteration := 0
 	var finalContent string
 	al.totalUsage.Reset()
+	softLimitLogged := false
+
+	// Hard safety brake — absolute maximum to prevent infinite runaway loops.
+	// The soft limit (agent.MaxIterations) does NOT stop the loop.
+	const maxAbsoluteIterations = 200
 
 	// Repetition detector: if the LLM calls the exact same tool with the
 	// exact same arguments 3+ times, it's stuck in a loop. Force-break
@@ -597,8 +626,31 @@ func (al *AgentLoop) runLLMIteration(
 	toolCallCounts := make(map[string]int) // key = "toolName:argsJSON"
 	const maxToolRepeat = 3
 
-	for iteration < agent.MaxIterations {
+	for {
 		iteration++
+
+		// Hard safety brake — only fires at 200 iterations (catastrophic runaway)
+		if iteration > maxAbsoluteIterations {
+			logger.ErrorCF("agent", "Hard safety brake: absolute iteration limit reached",
+				map[string]any{
+					"agent_id":  agent.ID,
+					"iteration": iteration,
+					"limit":     maxAbsoluteIterations,
+				})
+			break
+		}
+
+		// Soft checkpoint — log a warning when passing the configured limit,
+		// but keep going because the agent is still making progress.
+		if !softLimitLogged && iteration > agent.MaxIterations {
+			softLimitLogged = true
+			logger.WarnCF("agent", "Passed configured iteration soft limit, agent still working",
+				map[string]any{
+					"agent_id":   agent.ID,
+					"soft_limit": agent.MaxIterations,
+					"iteration":  iteration,
+				})
+		}
 
 		// Emit thinking event — the UI can show a spinner or iteration counter
 		al.emit(AgentEvent{
@@ -612,7 +664,7 @@ func (al *AgentLoop) runLLMIteration(
 			map[string]any{
 				"agent_id":  agent.ID,
 				"iteration": iteration,
-				"max":       agent.MaxIterations,
+				"max":       maxAbsoluteIterations,
 			})
 
 		// Build tool definitions
@@ -976,6 +1028,61 @@ func (al *AgentLoop) runLLMIteration(
 
 			// Save tool result message to session
 			agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
+		}
+	}
+
+	// ── Safety-brake wrap-up ──────────────────────────────────────────
+	// Only fires if the hard 200-iteration safety brake tripped (the agent
+	// was still actively calling tools). Make one final LLM call WITHOUT
+	// tools so it summarizes what was done and what remains.
+	if finalContent == "" && iteration > maxAbsoluteIterations {
+		logger.WarnCF("agent", "Safety brake triggered, requesting wrap-up summary",
+			map[string]any{
+				"agent_id":   agent.ID,
+				"iterations": iteration - 1,
+				"limit":      maxAbsoluteIterations,
+			})
+
+		al.emit(AgentEvent{
+			Type:      EventThinking,
+			Iteration: iteration,
+			MaxIter:   maxAbsoluteIterations,
+			Content:   "Safety limit reached — summarizing progress...",
+		})
+
+		wrapUpMsg := providers.Message{
+			Role: "user",
+			Content: "SYSTEM: Safety iteration limit reached (" +
+				fmt.Sprintf("%d", maxAbsoluteIterations) +
+				" tool calls). Stop calling tools. Provide a clear summary of:\n" +
+				"1. What you accomplished so far\n" +
+				"2. What steps remain to complete the task\n" +
+				"3. Any issues or errors encountered\n" +
+				"If the task is complete, confirm that. Be concise.",
+		}
+		messages = append(messages, wrapUpMsg)
+
+		wrapUpResp, wrapUpErr := agent.Provider.Chat(ctx, messages, nil, agent.Model, map[string]any{
+			"max_tokens":  agent.MaxTokens,
+			"temperature": agent.Temperature,
+		})
+		if wrapUpErr == nil && wrapUpResp.Content != "" {
+			finalContent = wrapUpResp.Content
+			al.totalUsage.Add(wrapUpResp.Usage)
+			al.emit(AgentEvent{
+				Type:             EventResponse,
+				Iteration:        iteration,
+				Content:          finalContent,
+				PromptTokens:     al.totalUsage.PromptTokens,
+				CompletionTokens: al.totalUsage.CompletionTokens,
+				TotalTokens:      al.totalUsage.TotalTokens,
+			})
+		} else if wrapUpErr != nil {
+			logger.ErrorCF("agent", "Wrap-up LLM call failed",
+				map[string]any{
+					"agent_id": agent.ID,
+					"error":    wrapUpErr.Error(),
+				})
 		}
 	}
 
