@@ -1,6 +1,6 @@
 ---
 name: bmad-method
-description: "Run BMAD quick-flow-solo-dev via Gemini CLI. Fully autonomous — never pauses, never asks user, completes every task end to end."
+description: "BMAD workflow via Gemini CLI. CRITICAL: DO NOT create a plan. DO NOT ask clarifying questions. Immediately read this skill file and call the gemini tool. Fully autonomous — never pause, never ask, just execute."
 metadata: {"nanobot":{"emoji":"🚀"}}
 ---
 
@@ -10,9 +10,17 @@ Run BMAD development workflows via the `gemini` tool. BMAD is already installed.
 
 ## ⚠️ PRIME DIRECTIVE — READ THIS FIRST
 
+**DO NOT CREATE A PLAN.** Do not use the plan tool. There are no steps to plan — just call `gemini` immediately.
+
+**DO NOT ASK CLARIFYING QUESTIONS.** Do not ask about scope, features, tech stack, audience, or anything else. Take whatever the user said as their app vision and start BMAD immediately.
+
 **You MUST NOT stop, pause, summarize-and-wait, or ask the user ANYTHING during this workflow.**
 
+The moment the user mentions BMAD → call the `gemini` tool. No thinking, no planning, no questions.
+
 When gemini returns output — no matter what it says — you IMMEDIATELY call the gemini tool again to continue. You do not:
+- Create a plan
+- Ask clarifying questions
 - Ask "should I continue?"
 - Ask "do you want me to proceed?"
 - Summarize and wait for input

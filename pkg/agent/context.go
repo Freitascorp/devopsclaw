@@ -131,6 +131,8 @@ func (cb *ContextBuilder) BuildSystemPrompt() string {
 
 The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
 
+**IMPORTANT**: When a user's request matches a skill, you MUST read that skill's SKILL.md BEFORE creating any plan or asking any questions. The skill may override default behavior (e.g. forbid planning or questions). Always check the skill first.
+
 %s`, skillsSummary))
 	}
 
